@@ -17,6 +17,18 @@ async function main() {
     },
   });
 
+  await prisma.user.upsert({
+    where: { username: 'admin2' },
+    update: {},
+    create: {
+      nom: 'Admin',
+      prenom: 'Secondaire',
+      username: 'admin2',
+      passwordHash: adminPasswordHash,
+      role: Role.SUPER_ADMIN,
+    },
+  });
+
   const boutique = await prisma.boutique.upsert({
     where: { id: 'seed-boutique-1' },
     update: {},
@@ -115,7 +127,7 @@ async function main() {
   }
 
   console.log(
-    'Seed terminé : admin/Admin123!, employe1/Employee123! (Boutique Centrale), employe2/Employee123! (Boutique Nord)',
+    'Seed terminé : admin/Admin123!, admin2/Admin123! (SUPER_ADMIN), employe1/Employee123! (Boutique Centrale), employe2/Employee123! (Boutique Nord)',
   );
 }
 
