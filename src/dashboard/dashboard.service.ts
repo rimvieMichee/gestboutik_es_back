@@ -76,7 +76,9 @@ export class DashboardService {
         return {
           userId: g.userId,
           nomComplet: user
-            ? `${user.prenom} ${user.nom}`
+            ? user.prenom
+              ? `${user.prenom} ${user.nom}`
+              : user.nom
             : 'Utilisateur inconnu',
           nombreVentes: g._count._all,
           chiffreAffaires: g._sum.montantTotal ?? 0,

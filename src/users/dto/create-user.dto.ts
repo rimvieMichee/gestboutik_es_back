@@ -11,13 +11,15 @@ import {
 // UsersService.create. boutiqueId n'est utile que pour un SUPER_ADMIN créant
 // un ADMIN — pour un ADMIN créant un EMPLOYEE, la boutique est toujours la sienne.
 export class CreateUserDto {
+  // Optionnels : un ajout rapide ne nécessite que l'identifiant et le mot de
+  // passe (voir UsersService.create, qui retombe sur le username si absents).
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  nom: string;
+  nom?: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  prenom: string;
+  prenom?: string;
 
   @IsOptional()
   @IsString()

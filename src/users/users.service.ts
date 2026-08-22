@@ -87,8 +87,10 @@ export class UsersService {
 
     return this.prisma.user.create({
       data: {
-        nom: dto.nom,
-        prenom: dto.prenom,
+        // Ajout rapide : à défaut de nom/prénom, on retombe sur l'identifiant
+        // (modifiable ensuite via la fiche du compte).
+        nom: dto.nom?.trim() || dto.username,
+        prenom: dto.prenom?.trim() || '',
         telephone: dto.telephone,
         email: dto.email,
         username: dto.username,

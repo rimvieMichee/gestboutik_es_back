@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
+import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import * as bcrypt from 'bcrypt';
@@ -135,7 +135,9 @@ describe('Flux critiques (e2e)', () => {
       },
       {
         secret: config.get<string>('JWT_ACCESS_SECRET'),
-        expiresIn: config.get<string>('JWT_ACCESS_EXPIRES_IN'),
+        expiresIn: config.get<string>(
+          'JWT_ACCESS_EXPIRES_IN',
+        ) as JwtSignOptions['expiresIn'],
       },
     );
 
