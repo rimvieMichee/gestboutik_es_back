@@ -13,6 +13,9 @@ datasource db {
 
 enum Role {
   SUPER_ADMIN
+  // Administrateur d'une boutique : créé par le SUPER_ADMIN en même temps que
+  // la boutique. Gère les employés, produits, stock et ventes de SA boutique.
+  ADMIN
   EMPLOYEE
 }
 

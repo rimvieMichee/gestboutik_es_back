@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -38,16 +39,34 @@ export class UsersService {
     private auditService: AuditService,
   ) {}
 
-  async create(dto: CreateUserDto) {
-    if (dto.role === Role.SUPER_ADMIN && dto.boutiqueId) {
-      throw new BadRequestException(
-        'Un SUPER_ADMIN ne doit pas être rattaché à une boutique.',
-      );
-    }
-    if (dto.role === Role.EMPLOYEE && !dto.boutiqueId) {
-      throw new BadRequestException(
-        'Un EMPLOYEE doit être rattaché à une boutique.',
-      );
+  /**
+   * Le rôle créé n'est jamais fourni par le client : un SUPER_ADMIN ne peut
+   * créer qu'un ADMIN (rattaché à la boutique demandée), un ADMIN ne peut
+   * créer qu'un EMPLOYEE, toujours rattaché à SA PROPRE boutique — jamais
+   * celle envoyée par le client.
+   */
+  async create(actor: AuthenticatedUser, dto: CreateUserDto) {
+    let role: Role;
+    let boutiqueId: string;
+
+    if (actor.role === Role.SUPER_ADMIN) {
+      role = Role.ADMIN;
+      if (!dto.boutiqueId) {
+        throw new BadRequestException(
+          'Un ADMIN doit être rattaché à une boutique.',
+        );
+      }
+      boutiqueId = dto.boutiqueId;
+    } else if (actor.role === Role.ADMIN) {
+      if (!actor.boutiqueId) {
+        throw new ForbiddenException(
+          "Aucune boutique n'est associée à ce compte.",
+        );
+      }
+      role = Role.EMPLOYEE;
+      boutiqueId = actor.boutiqueId;
+    } else {
+      throw new ForbiddenException('Action non autorisée.');
     }
 
     const existing = await this.prisma.user.findUnique({
@@ -57,13 +76,11 @@ export class UsersService {
       throw new ConflictException('Ce nom d’utilisateur est déjà utilisé.');
     }
 
-    if (dto.boutiqueId) {
-      const boutique = await this.prisma.boutique.findUnique({
-        where: { id: dto.boutiqueId },
-      });
-      if (!boutique) {
-        throw new NotFoundException('Boutique introuvable.');
-      }
+    const boutique = await this.prisma.boutique.findUnique({
+      where: { id: boutiqueId },
+    });
+    if (!boutique) {
+      throw new NotFoundException('Boutique introuvable.');
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
@@ -76,30 +93,59 @@ export class UsersService {
         email: dto.email,
         username: dto.username,
         passwordHash,
-        role: dto.role,
-        boutiqueId: dto.role === Role.EMPLOYEE ? dto.boutiqueId : null,
+        role,
+        boutiqueId,
       },
       select: SAFE_SELECT,
     });
   }
 
-  async findAll(query: QueryUserDto) {
+  /**
+   * Un SUPER_ADMIN ne gère que les comptes ADMIN, un ADMIN que les EMPLOYEE
+   * de sa propre boutique — jamais l'inverse, jamais une autre boutique.
+   */
+  private assertCanManage(
+    actor: AuthenticatedUser,
+    target: { role: Role; boutiqueId: string | null },
+  ): void {
+    if (actor.role === Role.SUPER_ADMIN && target.role === Role.ADMIN) {
+      return;
+    }
+    if (
+      actor.role === Role.ADMIN &&
+      target.role === Role.EMPLOYEE &&
+      target.boutiqueId === actor.boutiqueId
+    ) {
+      return;
+    }
+    throw new ForbiddenException(
+      'Ce compte ne peut pas être géré depuis cette action.',
+    );
+  }
+
+  async findAll(actor: AuthenticatedUser, query: QueryUserDto) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
 
-    const where: Prisma.UserWhereInput = {
-      ...(query.boutiqueId ? { boutiqueId: query.boutiqueId } : {}),
-      ...(query.role ? { role: query.role } : {}),
-      ...(query.search
-        ? {
-            OR: [
-              { nom: { contains: query.search, mode: 'insensitive' } },
-              { prenom: { contains: query.search, mode: 'insensitive' } },
-              { username: { contains: query.search, mode: 'insensitive' } },
-            ],
-          }
-        : {}),
-    };
+    let where: Prisma.UserWhereInput;
+    if (actor.role === Role.SUPER_ADMIN) {
+      where = {
+        role: Role.ADMIN,
+        ...(query.boutiqueId ? { boutiqueId: query.boutiqueId } : {}),
+      };
+    } else if (actor.role === Role.ADMIN) {
+      where = { role: Role.EMPLOYEE, boutiqueId: actor.boutiqueId };
+    } else {
+      throw new ForbiddenException('Action non autorisée.');
+    }
+
+    if (query.search) {
+      where.OR = [
+        { nom: { contains: query.search, mode: 'insensitive' } },
+        { prenom: { contains: query.search, mode: 'insensitive' } },
+        { username: { contains: query.search, mode: 'insensitive' } },
+      ];
+    }
 
     const [data, total] = await this.prisma.$transaction([
       this.prisma.user.findMany({
@@ -126,17 +172,15 @@ export class UsersService {
     return user;
   }
 
-  async update(id: string, dto: UpdateUserDto) {
-    await this.findOne(id);
+  async findOneManaged(actor: AuthenticatedUser, id: string) {
+    const user = await this.findOne(id);
+    this.assertCanManage(actor, user);
+    return user;
+  }
 
-    if (dto.boutiqueId) {
-      const boutique = await this.prisma.boutique.findUnique({
-        where: { id: dto.boutiqueId },
-      });
-      if (!boutique) {
-        throw new NotFoundException('Boutique introuvable.');
-      }
-    }
+  async update(actor: AuthenticatedUser, id: string, dto: UpdateUserDto) {
+    const target = await this.findOne(id);
+    this.assertCanManage(actor, target);
 
     return this.prisma.user.update({
       where: { id },
@@ -145,7 +189,7 @@ export class UsersService {
         prenom: dto.prenom,
         telephone: dto.telephone,
         email: dto.email,
-        boutiqueId: dto.boutiqueId,
+        // La boutique d'un compte géré n'est jamais réassignée depuis ce formulaire.
       },
       select: SAFE_SELECT,
     });
@@ -157,6 +201,7 @@ export class UsersService {
     actor: AuthenticatedUser,
   ) {
     const target = await this.findOne(id);
+    this.assertCanManage(actor, target);
     const user = await this.prisma.user.update({
       where: { id },
       data: { statut: dto.statut },
@@ -183,8 +228,13 @@ export class UsersService {
     return user;
   }
 
-  async resetPassword(id: string, dto: ResetPasswordDto) {
-    await this.findOne(id);
+  async resetPassword(
+    actor: AuthenticatedUser,
+    id: string,
+    dto: ResetPasswordDto,
+  ) {
+    const target = await this.findOne(id);
+    this.assertCanManage(actor, target);
     const passwordHash = await bcrypt.hash(dto.password, 12);
     await this.prisma.user.update({ where: { id }, data: { passwordHash } });
     await this.prisma.refreshToken.updateMany({

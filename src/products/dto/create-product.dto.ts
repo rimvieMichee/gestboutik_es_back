@@ -43,8 +43,4 @@ export class CreateProductDto {
   @IsOptional()
   @IsString()
   image?: string;
-
-  @IsString()
-  @IsNotEmpty()
-  boutiqueId: string;
 }

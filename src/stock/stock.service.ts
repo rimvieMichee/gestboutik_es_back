@@ -6,7 +6,10 @@ import {
 import { Prisma, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
-import { resolveBoutiqueScope } from '../common/utils/tenant-scope.util';
+import {
+  resolveBoutiqueScope,
+  assertSameBoutique,
+} from '../common/utils/tenant-scope.util';
 import { buildPaginationMeta } from '../common/utils/paginate.util';
 import { RestockDto } from './dto/restock.dto';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
@@ -16,8 +19,9 @@ import { QueryStockMovementDto } from './dto/query-stock-movement.dto';
 export class StockService {
   constructor(private prisma: PrismaService) {}
 
-  restock(dto: RestockDto) {
+  restock(actor: AuthenticatedUser, dto: RestockDto) {
     return this.applyMovement(
+      actor,
       dto.productId,
       dto.quantite,
       StockMovementType.RESTOCK,
@@ -25,8 +29,9 @@ export class StockService {
     );
   }
 
-  adjust(dto: AdjustStockDto) {
+  adjust(actor: AuthenticatedUser, dto: AdjustStockDto) {
     return this.applyMovement(
+      actor,
       dto.productId,
       dto.quantite,
       StockMovementType.ADJUSTMENT,
@@ -35,6 +40,7 @@ export class StockService {
   }
 
   private async applyMovement(
+    actor: AuthenticatedUser,
     productId: string,
     delta: number,
     type: StockMovementType,
@@ -45,6 +51,7 @@ export class StockService {
       if (!product) {
         throw new NotFoundException('Produit introuvable.');
       }
+      assertSameBoutique(actor, product.boutiqueId);
 
       if (delta < 0) {
         const { count } = await tx.product.updateMany({

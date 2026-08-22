@@ -32,31 +32,38 @@ export class UsersController {
     return this.usersService.findOne(user.userId);
   }
 
-  @Roles(Role.SUPER_ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Post()
-  create(@Body() dto: CreateUserDto) {
-    return this.usersService.create(dto);
+  create(@CurrentUser() actor: AuthenticatedUser, @Body() dto: CreateUserDto) {
+    return this.usersService.create(actor, dto);
   }
 
-  @Roles(Role.SUPER_ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Get()
-  findAll(@Query() query: QueryUserDto) {
-    return this.usersService.findAll(query);
+  findAll(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Query() query: QueryUserDto,
+  ) {
+    return this.usersService.findAll(actor, query);
   }
 
-  @Roles(Role.SUPER_ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.usersService.findOne(id);
+  findOne(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.usersService.findOneManaged(actor, id);
   }
 
-  @Roles(Role.SUPER_ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
-    return this.usersService.update(id, dto);
+  update(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateUserDto,
+  ) {
+    return this.usersService.update(actor, id, dto);
   }
 
-  @Roles(Role.SUPER_ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Patch(':id/status')
   changeStatus(
     @Param('id') id: string,
@@ -66,9 +73,13 @@ export class UsersController {
     return this.usersService.changeStatus(id, dto, actor);
   }
 
-  @Roles(Role.SUPER_ADMIN)
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Patch(':id/password')
-  resetPassword(@Param('id') id: string, @Body() dto: ResetPasswordDto) {
-    return this.usersService.resetPassword(id, dto);
+  resetPassword(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: ResetPasswordDto,
+  ) {
+    return this.usersService.resetPassword(actor, id, dto);
   }
 }

@@ -34,7 +34,7 @@ export class AuthService {
       throw new UnauthorizedException('Ce compte est désactivé.');
     }
     if (
-      user.role === Role.EMPLOYEE &&
+      user.role !== Role.SUPER_ADMIN &&
       (!user.boutique || user.boutique.statut !== BoutiqueStatus.ACTIVE)
     ) {
       throw new UnauthorizedException('Cette boutique est désactivée.');
@@ -103,7 +103,7 @@ export class AuthService {
       throw new UnauthorizedException('Compte désactivé.');
     }
     if (
-      user.role === Role.EMPLOYEE &&
+      user.role !== Role.SUPER_ADMIN &&
       (!user.boutique || user.boutique.statut !== BoutiqueStatus.ACTIVE)
     ) {
       throw new UnauthorizedException('Boutique désactivée.');

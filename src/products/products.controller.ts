@@ -25,14 +25,18 @@ import { QueryProductDto } from './dto/query-product.dto';
 export class ProductsController {
   constructor(private productsService: ProductsService) {}
 
-  // SUPER_ADMIN gère les produits en V1 ; architecture prête pour un accès boutique plus tard.
-  @Roles(Role.SUPER_ADMIN)
+  // L'ADMIN gère les produits de SA boutique (jamais une autre : boutiqueId
+  // est déduit de son compte, jamais du client).
+  @Roles(Role.ADMIN)
   @Post()
-  create(@Body() dto: CreateProductDto) {
-    return this.productsService.create(dto);
+  create(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Body() dto: CreateProductDto,
+  ) {
+    return this.productsService.create(actor, dto);
   }
 
-  // Accessible à l'EMPLOYEE (scopé à sa boutique) et au SUPER_ADMIN (vue globale ou filtrée).
+  // Accessible à l'EMPLOYEE et à l'ADMIN (scopés à leur boutique) et au SUPER_ADMIN (vue globale ou filtrée).
   @Get()
   findAll(
     @CurrentUser() user: AuthenticatedUser,
@@ -46,15 +50,23 @@ export class ProductsController {
     return this.productsService.findOne(user, id);
   }
 
-  @Roles(Role.SUPER_ADMIN)
+  @Roles(Role.ADMIN)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateProductDto) {
-    return this.productsService.update(id, dto);
+  update(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateProductDto,
+  ) {
+    return this.productsService.update(actor, id, dto);
   }
 
-  @Roles(Role.SUPER_ADMIN)
+  @Roles(Role.ADMIN)
   @Patch(':id/status')
-  changeStatus(@Param('id') id: string, @Body() dto: ChangeProductStatusDto) {
-    return this.productsService.changeStatus(id, dto);
+  changeStatus(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: ChangeProductStatusDto,
+  ) {
+    return this.productsService.changeStatus(actor, id, dto);
   }
 }

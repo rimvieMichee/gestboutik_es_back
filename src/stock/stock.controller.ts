@@ -15,16 +15,16 @@ import { QueryStockMovementDto } from './dto/query-stock-movement.dto';
 export class StockController {
   constructor(private stockService: StockService) {}
 
-  @Roles(Role.SUPER_ADMIN)
+  @Roles(Role.ADMIN)
   @Post('restock')
-  restock(@Body() dto: RestockDto) {
-    return this.stockService.restock(dto);
+  restock(@CurrentUser() actor: AuthenticatedUser, @Body() dto: RestockDto) {
+    return this.stockService.restock(actor, dto);
   }
 
-  @Roles(Role.SUPER_ADMIN)
+  @Roles(Role.ADMIN)
   @Post('adjustment')
-  adjust(@Body() dto: AdjustStockDto) {
-    return this.stockService.adjust(dto);
+  adjust(@CurrentUser() actor: AuthenticatedUser, @Body() dto: AdjustStockDto) {
+    return this.stockService.adjust(actor, dto);
   }
 
   // Historique consultable par l'employé (scopé à sa boutique) et l'admin.

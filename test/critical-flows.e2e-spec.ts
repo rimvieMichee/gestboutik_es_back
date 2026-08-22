@@ -1,5 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import * as bcrypt from 'bcrypt';
@@ -16,6 +18,7 @@ describe('Flux critiques (e2e)', () => {
   let productA: { id: string };
   let productB: { id: string };
   let adminAccess: string;
+  let boutiqueAdminAAccess: string;
   let employeeAAccess: string;
   let employeeAId: string;
 
@@ -101,12 +104,40 @@ describe('Flux critiques (e2e)', () => {
         boutiqueId: boutiqueB.id,
       },
     });
+    const boutiqueAdminA = await prisma.user.create({
+      data: {
+        nom: 'Admin',
+        prenom: 'BoutiqueA',
+        username: 'e2e-boutique-admin-a',
+        passwordHash,
+        role: Role.ADMIN,
+        boutiqueId: boutiqueA.id,
+      },
+    });
     employeeAId = employeeA.id;
 
     const adminLogin = await request(app.getHttpServer())
       .post('/api/auth/login')
       .send({ username: 'e2e-admin', password: 'Passw0rd!' });
     adminAccess = adminLogin.body.accessToken;
+
+    // Le login HTTP est throttlé (5/min) : on signe directement ce token de
+    // test via JwtService plutôt que de consommer un appel supplémentaire à
+    // /auth/login, pour ne pas rendre les autres tests de login flaky.
+    const jwtService = app.get(JwtService);
+    const config = app.get(ConfigService);
+    boutiqueAdminAAccess = await jwtService.signAsync(
+      {
+        sub: boutiqueAdminA.id,
+        username: boutiqueAdminA.username,
+        role: boutiqueAdminA.role,
+        boutiqueId: boutiqueAdminA.boutiqueId,
+      },
+      {
+        secret: config.get<string>('JWT_ACCESS_SECRET'),
+        expiresIn: config.get<string>('JWT_ACCESS_EXPIRES_IN'),
+      },
+    );
 
     const employeeALogin = await request(app.getHttpServer())
       .post('/api/auth/login')
@@ -234,8 +265,45 @@ describe('Flux critiques (e2e)', () => {
     });
   });
 
+  describe('Rôle ADMIN (gestion des employés de sa boutique)', () => {
+    it("un SUPER_ADMIN ne peut plus gérer directement un EMPLOYEE (c'est le rôle de l'ADMIN de boutique)", async () => {
+      const res = await request(app.getHttpServer())
+        .patch(`/api/users/${employeeAId}/status`)
+        .set('Authorization', `Bearer ${adminAccess}`)
+        .send({ statut: 'INACTIVE' });
+      expect(res.status).toBe(403);
+    });
+
+    it("un ADMIN ne peut pas gérer l'employé d'une autre boutique", async () => {
+      const employeeB = await prisma.user.findUniqueOrThrow({
+        where: { username: 'e2e-emp-b' },
+      });
+      const res = await request(app.getHttpServer())
+        .patch(`/api/users/${employeeB.id}/status`)
+        .set('Authorization', `Bearer ${boutiqueAdminAAccess}`)
+        .send({ statut: 'INACTIVE' });
+      expect(res.status).toBe(403);
+    });
+
+    it('un ADMIN ne peut créer un employé que pour SA boutique, quel que soit le boutiqueId envoyé', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/users')
+        .set('Authorization', `Bearer ${boutiqueAdminAAccess}`)
+        .send({
+          nom: 'Nouvel',
+          prenom: 'Employe',
+          username: 'e2e-new-emp',
+          password: 'Passw0rd!',
+          boutiqueId: boutiqueB.id,
+        });
+      expect(res.status).toBe(201);
+      expect(res.body.role).toBe('EMPLOYEE');
+      expect(res.body.boutiqueId).toBe(boutiqueA.id);
+    });
+  });
+
   describe('Désactivation', () => {
-    it("désactiver l'employé révoque immédiatement son accès, même avec un token encore valide", async () => {
+    it("désactiver l'employé (par l'ADMIN de sa boutique) révoque immédiatement son accès, même avec un token encore valide", async () => {
       const before = await request(app.getHttpServer())
         .get('/api/products')
         .set('Authorization', `Bearer ${employeeAAccess}`);
@@ -243,7 +311,7 @@ describe('Flux critiques (e2e)', () => {
 
       await request(app.getHttpServer())
         .patch(`/api/users/${employeeAId}/status`)
-        .set('Authorization', `Bearer ${adminAccess}`)
+        .set('Authorization', `Bearer ${boutiqueAdminAAccess}`)
         .send({ statut: 'INACTIVE' });
 
       const after = await request(app.getHttpServer())
@@ -253,7 +321,7 @@ describe('Flux critiques (e2e)', () => {
 
       await request(app.getHttpServer())
         .patch(`/api/users/${employeeAId}/status`)
-        .set('Authorization', `Bearer ${adminAccess}`)
+        .set('Authorization', `Bearer ${boutiqueAdminAAccess}`)
         .send({ statut: 'ACTIVE' });
     });
 

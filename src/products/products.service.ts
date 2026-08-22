@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
@@ -16,13 +20,13 @@ import { QueryProductDto } from './dto/query-product.dto';
 export class ProductsService {
   constructor(private prisma: PrismaService) {}
 
-  async create(dto: CreateProductDto) {
-    const boutique = await this.prisma.boutique.findUnique({
-      where: { id: dto.boutiqueId },
-    });
-    if (!boutique) {
-      throw new NotFoundException('Boutique introuvable.');
+  async create(actor: AuthenticatedUser, dto: CreateProductDto) {
+    if (!actor.boutiqueId) {
+      throw new ForbiddenException(
+        "Aucune boutique n'est associée à ce compte.",
+      );
     }
+    const boutiqueId = actor.boutiqueId;
 
     const quantiteInitiale = dto.quantiteDisponible ?? 0;
 
@@ -37,7 +41,7 @@ export class ProductsService {
           seuilAlerte: dto.seuilAlerte ?? 0,
           sku: dto.sku,
           image: dto.image,
-          boutiqueId: dto.boutiqueId,
+          boutiqueId,
         },
       });
 
@@ -98,19 +102,25 @@ export class ProductsService {
     return product;
   }
 
-  async update(id: string, dto: UpdateProductDto) {
+  async update(actor: AuthenticatedUser, id: string, dto: UpdateProductDto) {
     const product = await this.prisma.product.findUnique({ where: { id } });
     if (!product) {
       throw new NotFoundException('Produit introuvable.');
     }
+    assertSameBoutique(actor, product.boutiqueId);
     return this.prisma.product.update({ where: { id }, data: dto });
   }
 
-  async changeStatus(id: string, dto: ChangeProductStatusDto) {
+  async changeStatus(
+    actor: AuthenticatedUser,
+    id: string,
+    dto: ChangeProductStatusDto,
+  ) {
     const product = await this.prisma.product.findUnique({ where: { id } });
     if (!product) {
       throw new NotFoundException('Produit introuvable.');
     }
+    assertSameBoutique(actor, product.boutiqueId);
     return this.prisma.product.update({
       where: { id },
       data: { statut: dto.statut },

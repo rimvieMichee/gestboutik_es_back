@@ -3,32 +3,36 @@ import { Role } from '@prisma/client';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { DashboardService } from './dashboard.service';
 
+// Le tableau de bord est celui de l'ADMIN pour SA boutique : le SUPER_ADMIN
+// n'a pas de vue globale ici, ses pages se limitent aux boutiques (voir
+// BoutiquesController).
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.SUPER_ADMIN)
+@Roles(Role.ADMIN)
 @Controller('dashboard')
 export class DashboardController {
   constructor(private dashboardService: DashboardService) {}
 
   @Get('overview')
-  getOverview() {
-    return this.dashboardService.getOverview();
-  }
-
-  @Get('sales-by-boutique')
-  getSalesByBoutique() {
-    return this.dashboardService.getSalesByBoutique();
+  getOverview(@CurrentUser() actor: AuthenticatedUser) {
+    return this.dashboardService.getOverview(actor.boutiqueId as string);
   }
 
   @Get('sales-by-employee')
-  getSalesByEmployee() {
-    return this.dashboardService.getSalesByEmployee();
+  getSalesByEmployee(@CurrentUser() actor: AuthenticatedUser) {
+    return this.dashboardService.getSalesByEmployee(actor.boutiqueId as string);
   }
 
   @Get('recent-sales')
-  getRecentSales(@Query('limit') limit?: string) {
+  getRecentSales(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Query('limit') limit?: string,
+  ) {
     return this.dashboardService.getRecentSales(
+      actor.boutiqueId as string,
       limit ? parseInt(limit, 10) : undefined,
     );
   }

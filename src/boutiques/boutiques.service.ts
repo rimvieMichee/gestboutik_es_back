@@ -1,5 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma, Role } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
@@ -16,8 +21,44 @@ export class BoutiquesService {
     private auditService: AuditService,
   ) {}
 
-  create(dto: CreateBoutiqueDto) {
-    return this.prisma.boutique.create({ data: dto });
+  async create(dto: CreateBoutiqueDto) {
+    const existing = await this.prisma.user.findUnique({
+      where: { username: dto.adminUsername },
+    });
+    if (existing) {
+      throw new ConflictException(
+        'Ce nom d’utilisateur (admin) est déjà utilisé.',
+      );
+    }
+
+    const adminPasswordHash = await bcrypt.hash(dto.adminPassword, 12);
+
+    return this.prisma.$transaction(async (tx) => {
+      const boutique = await tx.boutique.create({
+        data: {
+          nom: dto.nom,
+          description: dto.description,
+          telephone: dto.telephone,
+          email: dto.email,
+          adresse: dto.adresse,
+          ville: dto.ville,
+        },
+      });
+
+      const admin = await tx.user.create({
+        data: {
+          nom: dto.adminNom,
+          prenom: dto.adminPrenom,
+          username: dto.adminUsername,
+          passwordHash: adminPasswordHash,
+          role: Role.ADMIN,
+          boutiqueId: boutique.id,
+        },
+        select: { id: true, nom: true, prenom: true, username: true },
+      });
+
+      return { ...boutique, admin };
+    });
   }
 
   async findAll(query: PaginationQueryDto) {

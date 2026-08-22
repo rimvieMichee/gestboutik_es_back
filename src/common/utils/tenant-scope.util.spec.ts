@@ -10,6 +10,13 @@ const employee = (boutiqueId: string | null): AuthenticatedUser => ({
   boutiqueId,
 });
 
+const boutiqueAdmin = (boutiqueId: string | null): AuthenticatedUser => ({
+  userId: 'b-admin',
+  username: 'badmin',
+  role: Role.ADMIN,
+  boutiqueId,
+});
+
 const admin: AuthenticatedUser = {
   userId: 'a1',
   username: 'admin',
@@ -42,6 +49,13 @@ describe('resolveBoutiqueScope', () => {
     expect(resolveBoutiqueScope(admin, 'b2')).toBe('b2');
     expect(resolveBoutiqueScope(admin)).toBeUndefined();
   });
+
+  it("force aussi la boutique de l'ADMIN, comme pour un employé", () => {
+    expect(resolveBoutiqueScope(boutiqueAdmin('b1'))).toBe('b1');
+    expect(() => resolveBoutiqueScope(boutiqueAdmin('b1'), 'b2')).toThrow(
+      ForbiddenException,
+    );
+  });
 });
 
 describe('assertSameBoutique', () => {
@@ -57,5 +71,12 @@ describe('assertSameBoutique', () => {
     expect(() => assertSameBoutique(employee('b1'), 'b2')).toThrow(
       ForbiddenException,
     );
+  });
+
+  it("bloque aussi un ADMIN sur une ressource d'une autre boutique", () => {
+    expect(() => assertSameBoutique(boutiqueAdmin('b1'), 'b2')).toThrow(
+      ForbiddenException,
+    );
+    expect(() => assertSameBoutique(boutiqueAdmin('b1'), 'b1')).not.toThrow();
   });
 });

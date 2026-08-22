@@ -8,6 +8,7 @@ import { Prisma, Role, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
+import { assertSameBoutique } from '../common/utils/tenant-scope.util';
 import { buildPaginationMeta } from '../common/utils/paginate.util';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { QuerySaleDto } from './dto/query-sale.dto';
@@ -154,6 +155,11 @@ export class SalesService {
       // L'employé ne consulte que ses propres ventes, dans sa boutique.
       where.boutiqueId = user.boutiqueId as string;
       where.userId = user.userId;
+    } else if (user.role === Role.ADMIN) {
+      // L'admin consulte toutes les ventes de SA boutique (jamais une autre),
+      // avec un filtre optionnel par employé.
+      where.boutiqueId = user.boutiqueId as string;
+      if (query.userId) where.userId = query.userId;
     } else {
       if (query.boutiqueId) where.boutiqueId = query.boutiqueId;
       if (query.userId) where.userId = query.userId;
@@ -195,6 +201,7 @@ export class SalesService {
     if (!sale) {
       throw new NotFoundException('Vente introuvable.');
     }
+    assertSameBoutique(user, sale.boutiqueId);
     if (user.role === Role.EMPLOYEE && sale.userId !== user.userId) {
       throw new ForbiddenException('Accès refusé à cette vente.');
     }

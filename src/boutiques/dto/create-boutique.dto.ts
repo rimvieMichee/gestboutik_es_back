@@ -1,4 +1,10 @@
-import { IsEmail, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import {
+  IsEmail,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MinLength,
+} from 'class-validator';
 
 export class CreateBoutiqueDto {
   @IsString()
@@ -24,4 +30,22 @@ export class CreateBoutiqueDto {
   @IsOptional()
   @IsString()
   ville?: string;
+
+  // Le SUPER_ADMIN crée la boutique et son administrateur en une seule étape :
+  // c'est ce compte Admin qui gérera ensuite les employés de la boutique.
+  @IsString()
+  @IsNotEmpty()
+  adminNom: string;
+
+  @IsString()
+  @IsNotEmpty()
+  adminPrenom: string;
+
+  @IsString()
+  @IsNotEmpty()
+  adminUsername: string;
+
+  @IsString()
+  @MinLength(8)
+  adminPassword: string;
 }

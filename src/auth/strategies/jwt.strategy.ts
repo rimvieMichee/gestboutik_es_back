@@ -34,7 +34,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Compte désactivé ou introuvable.');
     }
 
-    if (user.role === Role.EMPLOYEE) {
+    if (user.role !== Role.SUPER_ADMIN) {
       if (!user.boutique || user.boutique.statut !== BoutiqueStatus.ACTIVE) {
         throw new UnauthorizedException('Boutique désactivée.');
       }
