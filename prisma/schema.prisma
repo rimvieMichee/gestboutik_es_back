@@ -1,0 +1,224 @@
+// Schema Prisma - Plateforme de gestion de boutiques (multi-tenant)
+// https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  EMPLOYEE
+}
+
+enum BoutiqueStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum SaleStatus {
+  COMPLETED
+  CANCELLED
+}
+
+enum StockMovementType {
+  STOCK_INITIAL
+  SALE
+  RESTOCK
+  ADJUSTMENT
+}
+
+model Boutique {
+  id          String         @id @default(uuid())
+  nom         String
+  description String?
+  telephone   String?
+  email       String?
+  adresse     String?
+  ville       String?
+  statut      BoutiqueStatus @default(ACTIVE)
+  // Compteur interne utilisé pour générer un numéro de vente séquentiel et lisible (VENTE #000125).
+  saleCounter Int            @default(0)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  users          User[]
+  products       Product[]
+  sales          Sale[]
+  stockMovements StockMovement[]
+  auditLogs      AuditLog[]
+
+  @@index([statut])
+  @@map("boutiques")
+}
+
+model User {
+  id           String     @id @default(uuid())
+  nom          String
+  prenom       String
+  telephone    String?
+  email        String?
+  username     String     @unique
+  passwordHash String
+  role         Role       @default(EMPLOYEE)
+  statut       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  // Nullable : le SUPER_ADMIN n'est rattaché à aucune boutique.
+  // Un EMPLOYEE est toujours rattaché a une boutique (contrôlé en base applicative).
+  boutiqueId String?
+  boutique   Boutique? @relation(fields: [boutiqueId], references: [id], onDelete: Restrict)
+
+  sales          Sale[]
+  stockMovements StockMovement[]
+  refreshTokens  RefreshToken[]
+  auditLogs      AuditLog[]
+
+  @@index([boutiqueId])
+  @@index([role])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model Product {
+  id                 String        @id @default(uuid())
+  nom                String
+  description        String?
+  prixVente          Decimal       @db.Decimal(12, 2)
+  prixAchat          Decimal?      @db.Decimal(12, 2)
+  quantiteDisponible Int           @default(0)
+  seuilAlerte        Int           @default(0)
+  sku                String?
+  image              String?
+  statut             ProductStatus @default(ACTIVE)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  boutiqueId String
+  boutique   Boutique @relation(fields: [boutiqueId], references: [id], onDelete: Restrict)
+
+  saleItems      SaleItem[]
+  stockMovements StockMovement[]
+
+  @@unique([boutiqueId, sku])
+  @@index([boutiqueId])
+  @@map("products")
+}
+
+model Sale {
+  id           String     @id @default(uuid())
+  numeroVente  String     @unique
+  date         DateTime   @default(now())
+  montantTotal Decimal    @db.Decimal(12, 2)
+  statut       SaleStatus @default(COMPLETED)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  boutiqueId String
+  boutique   Boutique @relation(fields: [boutiqueId], references: [id], onDelete: Restrict)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  items          SaleItem[]
+  stockMovements StockMovement[]
+
+  @@index([boutiqueId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("sales")
+}
+
+model SaleItem {
+  id           String  @id @default(uuid())
+  quantite     Int
+  prixUnitaire Decimal @db.Decimal(12, 2)
+  sousTotal    Decimal @db.Decimal(12, 2)
+
+  saleId String
+  sale   Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([saleId])
+  @@index([productId])
+  @@map("sale_items")
+}
+
+model StockMovement {
+  id             String             @id @default(uuid())
+  type           StockMovementType
+  quantite       Int
+  quantiteAvant  Int
+  quantiteApres  Int
+  note           String?
+  createdAt      DateTime           @default(now())
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  boutiqueId String
+  boutique   Boutique @relation(fields: [boutiqueId], references: [id], onDelete: Restrict)
+
+  saleId String?
+  sale   Sale?   @relation(fields: [saleId], references: [id], onDelete: SetNull)
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([productId])
+  @@index([boutiqueId])
+  @@index([saleId])
+  @@index([createdAt])
+  @@map("stock_movements")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  boutiqueId String?
+  boutique   Boutique? @relation(fields: [boutiqueId], references: [id], onDelete: SetNull)
+
+  @@index([boutiqueId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

@@ -1,0 +1,19 @@
+# Base de données locale utilisée uniquement pour les tests automatisés (voir .env.test) :
+# npm run test:e2e vide toutes les tables à chaque exécution, ce qu'on ne veut jamais faire
+# sur la base Supabase partagée utilisée en dev/prod (voir .env).
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: gesboutik-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gesboutik
+      POSTGRES_PASSWORD: gesboutik
+      POSTGRES_DB: gesboutik
+    ports:
+      - "5434:5432"
+    volumes:
+      - gesboutik_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  gesboutik_postgres_data:
