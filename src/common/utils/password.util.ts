@@ -9,3 +9,12 @@ const ROUNDS = Number.parseInt(process.env.BCRYPT_ROUNDS ?? '10', 10);
 export function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, ROUNDS);
 }
+
+/** Vrai si le hash a été fait avec plus de tours que le coût actuel (plus lent à vérifier). */
+export function needsRehash(hash: string): boolean {
+  try {
+    return bcrypt.getRounds(hash) > ROUNDS;
+  } catch {
+    return false;
+  }
+}

@@ -5,6 +5,7 @@ import { BoutiqueStatus, Role, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { hashPassword, needsRehash } from '../common/utils/password.util';
 import { LoginDto } from './dto/login.dto';
 import { JwtPayload } from './types/authenticated-user.type';
 
@@ -43,6 +44,19 @@ export class AuthService {
     const passwordValid = await bcrypt.compare(dto.password, user.passwordHash);
     if (!passwordValid) {
       throw new UnauthorizedException('Identifiants invalides.');
+    }
+
+    // Les comptes créés avec un coût de hachage élevé se connectent lentement :
+    // on remplace silencieusement leur hash, sans faire attendre la réponse.
+    if (needsRehash(user.passwordHash)) {
+      void hashPassword(dto.password)
+        .then((passwordHash) =>
+          this.prisma.user.update({
+            where: { id: user.id },
+            data: { passwordHash },
+          }),
+        )
+        .catch(() => undefined);
     }
 
     const tokens = await this.issueTokenPair({
