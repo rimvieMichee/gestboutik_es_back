@@ -16,13 +16,24 @@ export interface UploadedImage {
 export class MediaService {
   private readonly folder: string;
   private readonly configured: boolean;
+  private readonly missing: string[];
 
   constructor(config: ConfigService) {
-    const cloudName = config.get<string>('CLOUDINARY_CLOUD_NAME');
-    const apiKey = config.get<string>('CLOUDINARY_API_KEY');
-    const apiSecret = config.get<string>('CLOUDINARY_API_SECRET');
-    this.folder = config.get<string>('CLOUDINARY_FOLDER') || 'gestion';
-    this.configured = !!(cloudName && apiKey && apiSecret);
+    // Tolère les espaces et guillemets collés par erreur dans le dashboard de l'hébergeur.
+    const read = (name: string) =>
+      (config.get<string>(name) ?? '').trim().replace(/^["']|["']$/g, '');
+    const cloudName = read('CLOUDINARY_CLOUD_NAME');
+    const apiKey = read('CLOUDINARY_API_KEY');
+    const apiSecret = read('CLOUDINARY_API_SECRET');
+    this.folder = read('CLOUDINARY_FOLDER') || 'gestion';
+    this.missing = [
+      ['CLOUDINARY_CLOUD_NAME', cloudName],
+      ['CLOUDINARY_API_KEY', apiKey],
+      ['CLOUDINARY_API_SECRET', apiSecret],
+    ]
+      .filter(([, value]) => !value)
+      .map(([name]) => name);
+    this.configured = this.missing.length === 0;
     if (this.configured) {
       cloudinary.config({
         cloud_name: cloudName,
@@ -37,7 +48,7 @@ export class MediaService {
   uploadImage(file: Express.Multer.File): Promise<UploadedImage> {
     if (!this.configured) {
       throw new ServiceUnavailableException(
-        "Le stockage d'images n'est pas configuré (CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET).",
+        `Le stockage d'images n'est pas configuré. Variables manquantes ou vides : ${this.missing.join(', ')}.`,
       );
     }
     if (!file?.buffer?.length) {
