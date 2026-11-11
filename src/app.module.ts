@@ -11,6 +11,7 @@ import { ProductsModule } from './products/products.module';
 import { SalesModule } from './sales/sales.module';
 import { StockModule } from './stock/stock.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { MediaModule } from './media/media.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { AppController } from './app.controller';
@@ -28,6 +29,7 @@ import { AppController } from './app.controller';
     SalesModule,
     StockModule,
     DashboardModule,
+    MediaModule,
   ],
   controllers: [AppController],
   providers: [

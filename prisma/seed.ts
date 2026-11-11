@@ -42,6 +42,22 @@ async function main() {
     },
   });
 
+  // Gestionnaires de boutique (rôle ADMIN) : ils se connectent à l'application
+  // mobile et y créent les comptes de leurs employés.
+  const managerPasswordHash = await bcrypt.hash('Gestion123!', 12);
+  await prisma.user.upsert({
+    where: { username: 'gestionnaire1' },
+    update: {},
+    create: {
+      nom: 'Ouédraogo',
+      prenom: 'Issa',
+      username: 'gestionnaire1',
+      passwordHash: managerPasswordHash,
+      role: Role.ADMIN,
+      boutiqueId: boutique.id,
+    },
+  });
+
   const employeePasswordHash = await bcrypt.hash('Employee123!', 12);
   await prisma.user.upsert({
     where: { username: 'employe1' },
@@ -92,6 +108,19 @@ async function main() {
     },
   });
 
+  await prisma.user.upsert({
+    where: { username: 'gestionnaire2' },
+    update: {},
+    create: {
+      nom: 'Traoré',
+      prenom: 'Fatou',
+      username: 'gestionnaire2',
+      passwordHash: managerPasswordHash,
+      role: Role.ADMIN,
+      boutiqueId: boutique2.id,
+    },
+  });
+
   const employee2PasswordHash = await bcrypt.hash('Employee123!', 12);
   await prisma.user.upsert({
     where: { username: 'employe2' },
@@ -127,7 +156,7 @@ async function main() {
   }
 
   console.log(
-    'Seed terminé : admin/Admin123!, admin2/Admin123! (SUPER_ADMIN), employe1/Employee123! (Boutique Centrale), employe2/Employee123! (Boutique Nord)',
+    'Seed terminé : admin/Admin123!, admin2/Admin123! (SUPER_ADMIN), gestionnaire1+2/Gestion123! (ADMIN boutique), employe1/Employee123! (Boutique Centrale), employe2/Employee123! (Boutique Nord)',
   );
 }
 
