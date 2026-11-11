@@ -14,6 +14,7 @@ import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { buildPaginationMeta } from '../common/utils/paginate.util';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateMeDto } from './dto/update-me.dto';
 import { ChangeUserStatusDto } from './dto/change-status.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { QueryUserDto } from './dto/query-user.dto';
@@ -160,6 +161,14 @@ export class UsersService {
     ]);
 
     return { data, meta: buildPaginationMeta(page, limit, total) };
+  }
+
+  async updateMe(userId: string, dto: UpdateMeDto) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { telephone: dto.telephone?.trim() || null },
+      select: SAFE_SELECT,
+    });
   }
 
   async findOne(id: string) {

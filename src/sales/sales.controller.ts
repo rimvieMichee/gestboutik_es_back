@@ -44,6 +44,16 @@ export class SalesController {
     return this.salesService.summary(user, query);
   }
 
+  // Rapport complet d'une période, pour le PDF du gestionnaire.
+  @Roles(Role.ADMIN)
+  @Get('report')
+  report(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: SummarySaleQueryDto,
+  ) {
+    return this.salesService.report(user, query);
+  }
+
   @Roles(Role.ADMIN)
   @Patch(':id/settle')
   settle(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {

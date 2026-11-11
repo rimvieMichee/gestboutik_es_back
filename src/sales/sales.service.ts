@@ -4,7 +4,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Role, SaleStatus, StockMovementType } from '@prisma/client';
+import {
+  Prisma,
+  ProductStatus,
+  Role,
+  SaleStatus,
+  StockMovementType,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
@@ -53,6 +59,11 @@ export class SalesService {
           if (product.boutiqueId !== boutiqueId) {
             throw new ForbiddenException(
               `Le produit "${product.nom}" n'appartient pas à votre boutique.`,
+            );
+          }
+          if (product.statut !== ProductStatus.ACTIVE) {
+            throw new BadRequestException(
+              `Le produit "${product.nom}" n'est plus disponible à la vente.`,
             );
           }
           const quantiteDemandee = quantitiesByProduct.get(productId)!;
@@ -267,6 +278,95 @@ export class SalesService {
       creditMontant: credit._sum.montantTotal ?? 0,
       creditEnCoursNombre: unpaid._count._all,
       creditEnCoursMontant: unpaid._sum.montantTotal ?? 0,
+    };
+  }
+
+  /**
+   * Rapport complet d'une période (typiquement une journée) pour le gestionnaire :
+   * en-tête (boutique, gestionnaire), totaux, et toutes les ventes avec leurs
+   * lignes. Sert de base au PDF généré par l'application.
+   */
+  async report(user: AuthenticatedUser, query: SummarySaleQueryDto) {
+    if (!user.boutiqueId) {
+      throw new ForbiddenException(
+        "Aucune boutique n'est associée à ce compte.",
+      );
+    }
+    const where: Prisma.SaleWhereInput = {
+      boutiqueId: user.boutiqueId,
+      statut: SaleStatus.COMPLETED,
+      userId: query.userId,
+      ...(query.dateFrom || query.dateTo
+        ? {
+            createdAt: {
+              ...(query.dateFrom ? { gte: new Date(query.dateFrom) } : {}),
+              ...(query.dateTo ? { lte: new Date(query.dateTo) } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const [boutique, gestionnaire, sales] = await Promise.all([
+      this.prisma.boutique.findUnique({
+        where: { id: user.boutiqueId },
+        select: { nom: true, telephone: true, adresse: true, ville: true },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: user.userId },
+        select: { nom: true, prenom: true, telephone: true },
+      }),
+      this.prisma.sale.findMany({
+        where,
+        orderBy: { createdAt: 'asc' },
+        take: 2000,
+        include: {
+          items: { include: { product: { select: { nom: true } } } },
+          user: { select: { nom: true, prenom: true } },
+        },
+      }),
+    ]);
+
+    let total = new Prisma.Decimal(0);
+    let encaisse = new Prisma.Decimal(0);
+    let creditDu = new Prisma.Decimal(0);
+    let articles = 0;
+    const ventes = sales.map((sale) => {
+      const credit = sale.isCredit && sale.creditRegleAt === null;
+      total = total.add(sale.montantTotal);
+      if (credit) creditDu = creditDu.add(sale.montantTotal);
+      else encaisse = encaisse.add(sale.montantTotal);
+      const lignes = sale.items.map((item) => {
+        articles += item.quantite;
+        return {
+          produit: item.product.nom,
+          quantite: item.quantite,
+          prixUnitaire: item.prixUnitaire,
+          sousTotal: item.sousTotal,
+        };
+      });
+      return {
+        numeroVente: sale.numeroVente,
+        date: sale.createdAt,
+        montantTotal: sale.montantTotal,
+        // « Crédit » tant que l'emprunteur n'a pas payé, « Payé » sinon.
+        statut: credit ? 'CREDIT' : 'PAYE',
+        clientNom: sale.clientNom,
+        vendeur: `${sale.user.prenom} ${sale.user.nom}`.trim(),
+        lignes,
+      };
+    });
+
+    return {
+      boutique,
+      gestionnaire,
+      totaux: {
+        nombreVentes: sales.length,
+        articlesVendus: articles,
+        chiffreAffaires: total,
+        encaisse,
+        creditDu,
+      },
+      ventes,
     };
   }
 

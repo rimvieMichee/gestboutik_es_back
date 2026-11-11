@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, StockMovementType } from '@prisma/client';
+import { Prisma, ProductStatus, Role, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import {
@@ -69,7 +69,13 @@ export class ProductsService {
 
     const where: Prisma.ProductWhereInput = {
       ...(boutiqueId ? { boutiqueId } : {}),
-      ...(query.statut ? { statut: query.statut } : {}),
+      // L'employé ne voit que les produits en vente : un produit archivé par le
+      // gestionnaire disparaît de sa liste.
+      ...(user.role === Role.EMPLOYEE
+        ? { statut: ProductStatus.ACTIVE }
+        : query.statut
+          ? { statut: query.statut }
+          : {}),
       ...(query.search
         ? {
             OR: [

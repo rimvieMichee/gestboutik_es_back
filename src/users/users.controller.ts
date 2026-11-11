@@ -14,6 +14,7 @@ import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateMeDto } from './dto/update-me.dto';
 import { ChangeUserStatusDto } from './dto/change-status.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { QueryUserDto } from './dto/query-user.dto';
@@ -26,6 +27,12 @@ export class UsersController {
   @Get('me')
   findMe(@CurrentUser() user: AuthenticatedUser) {
     return this.usersService.findOne(user.userId);
+  }
+
+  // Déclaré avant ':id' pour ne pas être pris pour un identifiant.
+  @Patch('me')
+  updateMe(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateMeDto) {
+    return this.usersService.updateMe(user.userId, dto);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
