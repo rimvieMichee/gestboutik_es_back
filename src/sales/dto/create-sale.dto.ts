@@ -2,9 +2,14 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsInt,
+  IsNotEmpty,
+  IsOptional,
   IsPositive,
   IsString,
+  MaxLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 
@@ -25,4 +30,15 @@ export class CreateSaleDto {
   @ValidateNested({ each: true })
   @Type(() => SaleItemDto)
   items: SaleItemDto[];
+
+  // Vente à crédit : le nom de l'emprunteur est alors obligatoire.
+  @IsOptional()
+  @IsBoolean()
+  estCredit?: boolean;
+
+  @ValidateIf((o: CreateSaleDto) => o.estCredit === true)
+  @IsString()
+  @IsNotEmpty({ message: "Le nom de l'emprunteur est obligatoire." })
+  @MaxLength(120)
+  clientNom?: string;
 }

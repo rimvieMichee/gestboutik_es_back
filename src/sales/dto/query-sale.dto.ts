@@ -1,4 +1,4 @@
-import { IsDateString, IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsIn, IsOptional, IsString } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 export class QuerySaleDto extends PaginationQueryDto {
@@ -18,4 +18,25 @@ export class QuerySaleDto extends PaginationQueryDto {
   @IsOptional()
   @IsDateString()
   dateTo?: string;
+
+  // all = toute vente à crédit, unpaid = crédit non réglé, paid = crédit réglé,
+  // cash = vente au comptant. Absent = toutes les ventes.
+  @IsOptional()
+  @IsIn(['all', 'unpaid', 'paid', 'cash'])
+  credit?: 'all' | 'unpaid' | 'paid' | 'cash';
+}
+
+export class SummarySaleQueryDto {
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
+
+  // Utile au gestionnaire seulement : totaux d'un employé précis.
+  @IsOptional()
+  @IsString()
+  userId?: string;
 }

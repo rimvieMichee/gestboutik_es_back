@@ -146,6 +146,11 @@ model Sale {
   date         DateTime   @default(now())
   montantTotal Decimal    @db.Decimal(12, 2)
   statut       SaleStatus @default(COMPLETED)
+  // Vente à crédit : le client (clientNom) repart sans payer. Tant que
+  // creditRegleAt est null, la somme est due ; le gestionnaire la règle ensuite.
+  isCredit      Boolean   @default(false)
+  clientNom     String?
+  creditRegleAt DateTime?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
@@ -160,6 +165,7 @@ model Sale {
 
   @@unique([boutiqueId, numeroVente])
   @@index([boutiqueId])
+  @@index([boutiqueId, isCredit, creditRegleAt])
   @@index([userId])
   @@index([createdAt])
   @@map("sales")

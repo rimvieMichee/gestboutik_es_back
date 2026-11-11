@@ -4,14 +4,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Role, StockMovementType } from '@prisma/client';
+import { Prisma, Role, SaleStatus, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { assertSameBoutique } from '../common/utils/tenant-scope.util';
 import { buildPaginationMeta } from '../common/utils/paginate.util';
 import { CreateSaleDto } from './dto/create-sale.dto';
-import { QuerySaleDto } from './dto/query-sale.dto';
+import { QuerySaleDto, SummarySaleQueryDto } from './dto/query-sale.dto';
 
 @Injectable()
 export class SalesService {
@@ -91,6 +91,8 @@ export class SalesService {
           boutiqueId,
           userId: user.userId,
           montantTotal,
+          isCredit: dto.estCredit === true,
+          clientNom: dto.estCredit === true ? dto.clientNom?.trim() : null,
           items: { create: itemsData },
         },
         include: { items: { include: { product: true } } },
@@ -137,6 +139,8 @@ export class SalesService {
           metadata: {
             numeroVente: sale.numeroVente,
             montantTotal: montantTotal.toString(),
+            credit: sale.isCredit,
+            clientNom: sale.clientNom,
           },
         },
         tx,
@@ -164,6 +168,7 @@ export class SalesService {
       if (query.boutiqueId) where.boutiqueId = query.boutiqueId;
       if (query.userId) where.userId = query.userId;
     }
+    Object.assign(where, this.creditFilter(query.credit));
     if (query.dateFrom || query.dateTo) {
       where.createdAt = {
         ...(query.dateFrom ? { gte: new Date(query.dateFrom) } : {}),
@@ -187,6 +192,112 @@ export class SalesService {
     ]);
 
     return { data, meta: buildPaginationMeta(page, limit, total) };
+  }
+
+  private creditFilter(
+    credit?: 'all' | 'unpaid' | 'paid' | 'cash',
+  ): Prisma.SaleWhereInput {
+    switch (credit) {
+      case 'cash':
+        return { isCredit: false };
+      case 'all':
+        return { isCredit: true };
+      case 'unpaid':
+        return { isCredit: true, creditRegleAt: null };
+      case 'paid':
+        return { isCredit: true, creditRegleAt: { not: null } };
+      default:
+        return {};
+    }
+  }
+
+  /**
+   * Totaux sur une période (dateFrom/dateTo, calculées côté client dans son
+   * fuseau horaire) : ventes, chiffre d'affaires, part à crédit. Un employé ne
+   * voit que ses ventes ; le gestionnaire voit toute sa boutique (ou un
+   * employé via userId). `creditEnCours` ignore la période : c'est tout ce qui
+   * reste dû à ce jour.
+   */
+  async summary(user: AuthenticatedUser, query: SummarySaleQueryDto) {
+    if (!user.boutiqueId) {
+      throw new ForbiddenException(
+        "Aucune boutique n'est associée à ce compte.",
+      );
+    }
+    const scope: Prisma.SaleWhereInput = {
+      boutiqueId: user.boutiqueId,
+      statut: SaleStatus.COMPLETED,
+      userId: user.role === Role.EMPLOYEE ? user.userId : query.userId,
+    };
+    const range: Prisma.SaleWhereInput =
+      query.dateFrom || query.dateTo
+        ? {
+            createdAt: {
+              ...(query.dateFrom ? { gte: new Date(query.dateFrom) } : {}),
+              ...(query.dateTo ? { lte: new Date(query.dateTo) } : {}),
+            },
+          }
+        : {};
+
+    const [all, credit, unpaid] = await Promise.all([
+      this.prisma.sale.aggregate({
+        where: { ...scope, ...range },
+        _count: { _all: true },
+        _sum: { montantTotal: true },
+      }),
+      this.prisma.sale.aggregate({
+        where: { ...scope, ...range, isCredit: true },
+        _count: { _all: true },
+        _sum: { montantTotal: true },
+      }),
+      this.prisma.sale.aggregate({
+        where: { ...scope, isCredit: true, creditRegleAt: null },
+        _count: { _all: true },
+        _sum: { montantTotal: true },
+      }),
+    ]);
+
+    return {
+      nombreVentes: all._count._all,
+      chiffreAffaires: all._sum.montantTotal ?? 0,
+      nombreCredits: credit._count._all,
+      creditMontant: credit._sum.montantTotal ?? 0,
+      creditEnCoursNombre: unpaid._count._all,
+      creditEnCoursMontant: unpaid._sum.montantTotal ?? 0,
+    };
+  }
+
+  /** Le gestionnaire marque un crédit comme réglé (l'emprunteur a payé). */
+  async settleCredit(user: AuthenticatedUser, id: string) {
+    const sale = await this.findOne(user, id);
+    if (!sale.isCredit) {
+      throw new BadRequestException("Cette vente n'est pas à crédit.");
+    }
+    if (sale.creditRegleAt) {
+      throw new BadRequestException('Ce crédit est déjà réglé.');
+    }
+    const updated = await this.prisma.sale.update({
+      where: { id },
+      data: { creditRegleAt: new Date() },
+      include: {
+        items: { include: { product: true } },
+        user: { select: { id: true, nom: true, prenom: true } },
+        boutique: { select: { id: true, nom: true } },
+      },
+    });
+    await this.auditService.record({
+      action: 'CREDIT_SETTLED',
+      entity: 'Sale',
+      entityId: id,
+      userId: user.userId,
+      boutiqueId: sale.boutiqueId,
+      metadata: {
+        numeroVente: sale.numeroVente,
+        clientNom: sale.clientNom,
+        montantTotal: sale.montantTotal.toString(),
+      },
+    });
+    return updated;
   }
 
   async findOne(user: AuthenticatedUser, id: string) {
