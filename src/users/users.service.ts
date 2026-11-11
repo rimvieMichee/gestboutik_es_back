@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Role, UserStatus } from '@prisma/client';
+import { Prisma, Role, SaleStatus, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -178,6 +178,45 @@ export class UsersService {
     const user = await this.findOne(id);
     this.assertCanManage(actor, user);
     return user;
+  }
+
+  /** Activité d'un employé géré par l'acteur : ventes totales et du jour, chiffre d'affaires. */
+  async getStats(actor: AuthenticatedUser, id: string) {
+    await this.findOneManaged(actor, id);
+
+    const now = new Date();
+    const startOfDay = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
+    const base = { userId: id, statut: SaleStatus.COMPLETED };
+
+    const [total, today, last] = await Promise.all([
+      this.prisma.sale.aggregate({
+        where: base,
+        _count: { _all: true },
+        _sum: { montantTotal: true },
+      }),
+      this.prisma.sale.aggregate({
+        where: { ...base, createdAt: { gte: startOfDay } },
+        _count: { _all: true },
+        _sum: { montantTotal: true },
+      }),
+      this.prisma.sale.findFirst({
+        where: base,
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      }),
+    ]);
+
+    return {
+      nombreVentes: total._count._all,
+      chiffreAffaires: total._sum.montantTotal ?? 0,
+      ventesDuJour: today._count._all,
+      chiffreAffairesDuJour: today._sum.montantTotal ?? 0,
+      derniereVente: last?.createdAt ?? null,
+    };
   }
 
   async update(actor: AuthenticatedUser, id: string, dto: UpdateUserDto) {

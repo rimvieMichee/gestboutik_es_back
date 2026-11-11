@@ -48,6 +48,12 @@ export class UsersController {
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)
+  @Get(':id/stats')
+  getStats(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.usersService.getStats(actor, id);
+  }
+
+  @Roles(Role.SUPER_ADMIN, Role.ADMIN)
   @Get(':id')
   findOne(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
     return this.usersService.findOneManaged(actor, id);
