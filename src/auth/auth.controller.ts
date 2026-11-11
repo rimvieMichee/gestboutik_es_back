@@ -1,15 +1,7 @@
-import {
-  Body,
-  Controller,
-  HttpCode,
-  HttpStatus,
-  Post,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import type { AuthenticatedUser } from './types/authenticated-user.type';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -33,7 +25,6 @@ export class AuthController {
     return this.authService.refresh(dto.refreshToken);
   }
 
-  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   @Post('logout')
   logout(@CurrentUser() user: AuthenticatedUser, @Body() dto: RefreshTokenDto) {

@@ -1,7 +1,5 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { Role } from '@prisma/client';
-import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
@@ -10,7 +8,6 @@ import { DashboardService } from './dashboard.service';
 // Le tableau de bord est celui de l'ADMIN pour SA boutique : le SUPER_ADMIN
 // n'a pas de vue globale ici, ses pages se limitent aux boutiques (voir
 // BoutiquesController).
-@UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.ADMIN)
 @Controller('dashboard')
 export class DashboardController {

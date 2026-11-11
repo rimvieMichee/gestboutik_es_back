@@ -97,7 +97,7 @@ export class StockService {
       ...(query.productId ? { productId: query.productId } : {}),
     };
 
-    const [data, total] = await this.prisma.$transaction([
+    const [data, total] = await Promise.all([
       this.prisma.stockMovement.findMany({
         where,
         skip: (page - 1) * limit,

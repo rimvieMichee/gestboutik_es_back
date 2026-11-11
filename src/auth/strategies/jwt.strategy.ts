@@ -4,6 +4,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { Role, UserStatus, BoutiqueStatus } from '@prisma/client';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuthCacheService } from '../auth-cache.service';
 import {
   AuthenticatedUser,
   JwtPayload,
@@ -14,6 +15,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
     private config: ConfigService,
     private prisma: PrismaService,
+    private authCache: AuthCacheService,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -23,11 +25,22 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: JwtPayload): Promise<AuthenticatedUser> {
-    // Revérifie l'état en base à chaque requête : une désactivation (user ou boutique)
-    // doit être effective immédiatement, sans attendre l'expiration du token.
+    // Une désactivation (compte ou boutique) doit être effective immédiatement :
+    // l'état est revérifié en base, mais mémorisé quelques secondes et invalidé
+    // dès qu'un statut change (voir AuthCacheService).
+    const cached = this.authCache.get(payload.sub);
+    if (cached) return cached;
+
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      include: { boutique: true },
+      select: {
+        id: true,
+        username: true,
+        role: true,
+        statut: true,
+        boutiqueId: true,
+        boutique: { select: { statut: true } },
+      },
     });
 
     if (!user || user.statut !== UserStatus.ACTIVE) {
@@ -40,11 +53,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       }
     }
 
-    return {
+    const authenticated: AuthenticatedUser = {
       userId: user.id,
       username: user.username,
       role: user.role,
       boutiqueId: user.boutiqueId,
     };
+    this.authCache.set(user.id, authenticated);
+    return authenticated;
   }
 }

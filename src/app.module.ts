@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
+import { AuthCacheModule } from './auth/auth-cache.module';
 import { BoutiquesModule } from './boutiques/boutiques.module';
 import { UsersModule } from './users/users.module';
 import { ProductsModule } from './products/products.module';
@@ -22,6 +23,7 @@ import { AppController } from './app.controller';
     ThrottlerModule.forRoot({ throttlers: [{ ttl: 60000, limit: 100 }] }),
     PrismaModule,
     AuditModule,
+    AuthCacheModule,
     AuthModule,
     BoutiquesModule,
     UsersModule,

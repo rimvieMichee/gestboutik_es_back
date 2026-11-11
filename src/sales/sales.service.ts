@@ -38,116 +38,119 @@ export class SalesService {
     }
     const productIds = [...quantitiesByProduct.keys()];
 
-    return this.prisma.$transaction(async (tx) => {
-      const products = await tx.product.findMany({
-        where: { id: { in: productIds } },
-      });
-
-      const productsById = new Map(products.map((p) => [p.id, p]));
-      for (const productId of productIds) {
-        const product = productsById.get(productId);
-        if (!product) {
-          throw new NotFoundException(`Produit ${productId} introuvable.`);
-        }
-        if (product.boutiqueId !== boutiqueId) {
-          throw new ForbiddenException(
-            `Le produit "${product.nom}" n'appartient pas à votre boutique.`,
-          );
-        }
-        const quantiteDemandee = quantitiesByProduct.get(productId)!;
-        if (product.quantiteDisponible < quantiteDemandee) {
-          throw new BadRequestException(
-            `Stock insuffisant pour "${product.nom}" (disponible : ${product.quantiteDisponible}, demandé : ${quantiteDemandee}).`,
-          );
-        }
-      }
-
-      let montantTotal = new Prisma.Decimal(0);
-      const itemsData: Prisma.SaleItemCreateWithoutSaleInput[] = [];
-      for (const productId of productIds) {
-        const product = productsById.get(productId)!;
-        const quantite = quantitiesByProduct.get(productId)!;
-        const prixUnitaire = product.prixVente;
-        const sousTotal = new Prisma.Decimal(prixUnitaire).mul(quantite);
-        montantTotal = montantTotal.add(sousTotal);
-        itemsData.push({
-          quantite,
-          prixUnitaire,
-          sousTotal,
-          product: { connect: { id: productId } },
+    return this.prisma.$transaction(
+      async (tx) => {
+        const products = await tx.product.findMany({
+          where: { id: { in: productIds } },
         });
-      }
 
-      // Numérotation séquentielle par boutique, atomique grâce au verrou de ligne posé par l'UPDATE.
-      const boutique = await tx.boutique.update({
-        where: { id: boutiqueId },
-        data: { saleCounter: { increment: 1 } },
-      });
-      const numeroVente = `VENTE-${boutique.saleCounter.toString().padStart(6, '0')}`;
-
-      const sale = await tx.sale.create({
-        data: {
-          numeroVente,
-          boutiqueId,
-          userId: user.userId,
-          montantTotal,
-          isCredit: dto.estCredit === true,
-          clientNom: dto.estCredit === true ? dto.clientNom?.trim() : null,
-          items: { create: itemsData },
-        },
-        include: { items: { include: { product: true } } },
-      });
-
-      for (const productId of productIds) {
-        const quantite = quantitiesByProduct.get(productId)!;
-        const product = productsById.get(productId)!;
-
-        // Décrément atomique et conditionnel : protège contre une vente concurrente
-        // qui aurait fait tomber le stock disponible sous le seuil entre-temps.
-        const { count } = await tx.product.updateMany({
-          where: { id: productId, quantiteDisponible: { gte: quantite } },
-          data: { quantiteDisponible: { decrement: quantite } },
-        });
-        if (count === 0) {
-          throw new BadRequestException(
-            `Stock insuffisant pour "${product.nom}".`,
-          );
+        const productsById = new Map(products.map((p) => [p.id, p]));
+        for (const productId of productIds) {
+          const product = productsById.get(productId);
+          if (!product) {
+            throw new NotFoundException(`Produit ${productId} introuvable.`);
+          }
+          if (product.boutiqueId !== boutiqueId) {
+            throw new ForbiddenException(
+              `Le produit "${product.nom}" n'appartient pas à votre boutique.`,
+            );
+          }
+          const quantiteDemandee = quantitiesByProduct.get(productId)!;
+          if (product.quantiteDisponible < quantiteDemandee) {
+            throw new BadRequestException(
+              `Stock insuffisant pour "${product.nom}" (disponible : ${product.quantiteDisponible}, demandé : ${quantiteDemandee}).`,
+            );
+          }
         }
 
-        const quantiteApres = product.quantiteDisponible - quantite;
-        await tx.stockMovement.create({
+        let montantTotal = new Prisma.Decimal(0);
+        const itemsData: Prisma.SaleItemCreateWithoutSaleInput[] = [];
+        for (const productId of productIds) {
+          const product = productsById.get(productId)!;
+          const quantite = quantitiesByProduct.get(productId)!;
+          const prixUnitaire = product.prixVente;
+          const sousTotal = new Prisma.Decimal(prixUnitaire).mul(quantite);
+          montantTotal = montantTotal.add(sousTotal);
+          itemsData.push({
+            quantite,
+            prixUnitaire,
+            sousTotal,
+            product: { connect: { id: productId } },
+          });
+        }
+
+        // Numérotation séquentielle par boutique, atomique grâce au verrou de ligne posé par l'UPDATE.
+        const boutique = await tx.boutique.update({
+          where: { id: boutiqueId },
+          data: { saleCounter: { increment: 1 } },
+        });
+        const numeroVente = `VENTE-${boutique.saleCounter.toString().padStart(6, '0')}`;
+
+        const sale = await tx.sale.create({
           data: {
+            numeroVente,
+            boutiqueId,
+            userId: user.userId,
+            montantTotal,
+            isCredit: dto.estCredit === true,
+            clientNom: dto.estCredit === true ? dto.clientNom?.trim() : null,
+            items: { create: itemsData },
+          },
+          include: { items: { include: { product: true } } },
+        });
+
+        const movements: Prisma.StockMovementCreateManyInput[] = [];
+        for (const productId of productIds) {
+          const quantite = quantitiesByProduct.get(productId)!;
+          const product = productsById.get(productId)!;
+
+          // Décrément atomique et conditionnel : protège contre une vente concurrente
+          // qui aurait fait tomber le stock disponible sous le seuil entre-temps.
+          const { count } = await tx.product.updateMany({
+            where: { id: productId, quantiteDisponible: { gte: quantite } },
+            data: { quantiteDisponible: { decrement: quantite } },
+          });
+          if (count === 0) {
+            throw new BadRequestException(
+              `Stock insuffisant pour "${product.nom}".`,
+            );
+          }
+
+          movements.push({
             productId,
             boutiqueId,
             type: StockMovementType.SALE,
             quantite: -quantite,
             quantiteAvant: product.quantiteDisponible,
-            quantiteApres,
+            quantiteApres: product.quantiteDisponible - quantite,
             saleId: sale.id,
             userId: user.userId,
-          },
-        });
-      }
+          });
+        }
+        // Un seul INSERT pour tous les mouvements de stock.
+        await tx.stockMovement.createMany({ data: movements });
 
-      await this.auditService.record(
-        {
-          action: 'SALE_CREATED',
-          entity: 'Sale',
-          entityId: sale.id,
-          userId: user.userId,
-          boutiqueId,
-          metadata: {
-            numeroVente: sale.numeroVente,
-            montantTotal: montantTotal.toString(),
-            credit: sale.isCredit,
-            clientNom: sale.clientNom,
+        await this.auditService.record(
+          {
+            action: 'SALE_CREATED',
+            entity: 'Sale',
+            entityId: sale.id,
+            userId: user.userId,
+            boutiqueId,
+            metadata: {
+              numeroVente: sale.numeroVente,
+              montantTotal: montantTotal.toString(),
+              credit: sale.isCredit,
+              clientNom: sale.clientNom,
+            },
           },
-        },
-        tx,
-      );
+          tx,
+        );
 
-      return sale;
-    });
+        return sale;
+      },
+      { maxWait: 10_000, timeout: 30_000 },
+    );
   }
 
   async findAll(user: AuthenticatedUser, query: QuerySaleDto) {
@@ -176,7 +179,7 @@ export class SalesService {
       };
     }
 
-    const [data, total] = await this.prisma.$transaction([
+    const [data, total] = await Promise.all([
       this.prisma.sale.findMany({
         where,
         skip: (page - 1) * limit,

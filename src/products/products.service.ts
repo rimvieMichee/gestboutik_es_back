@@ -80,7 +80,7 @@ export class ProductsService {
         : {}),
     };
 
-    const [data, total] = await this.prisma.$transaction([
+    const [data, total] = await Promise.all([
       this.prisma.product.findMany({
         where,
         skip: (page - 1) * limit,

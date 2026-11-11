@@ -6,9 +6,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, Role, SaleStatus, UserStatus } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
+import { hashPassword } from '../common/utils/password.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { AuthCacheService } from '../auth/auth-cache.service';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { buildPaginationMeta } from '../common/utils/paginate.util';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -37,6 +38,7 @@ export class UsersService {
   constructor(
     private prisma: PrismaService,
     private auditService: AuditService,
+    private authCache: AuthCacheService,
   ) {}
 
   /**
@@ -69,21 +71,18 @@ export class UsersService {
       throw new ForbiddenException('Action non autorisée.');
     }
 
-    const existing = await this.prisma.user.findUnique({
-      where: { username: dto.username },
-    });
+    // Vérifications et hachage en parallèle : trois attentes au lieu de les enchaîner.
+    const [existing, boutique, passwordHash] = await Promise.all([
+      this.prisma.user.findUnique({ where: { username: dto.username } }),
+      this.prisma.boutique.findUnique({ where: { id: boutiqueId } }),
+      hashPassword(dto.password),
+    ]);
     if (existing) {
       throw new ConflictException('Ce nom d’utilisateur est déjà utilisé.');
     }
-
-    const boutique = await this.prisma.boutique.findUnique({
-      where: { id: boutiqueId },
-    });
     if (!boutique) {
       throw new NotFoundException('Boutique introuvable.');
     }
-
-    const passwordHash = await bcrypt.hash(dto.password, 12);
 
     return this.prisma.user.create({
       data: {
@@ -149,7 +148,7 @@ export class UsersService {
       ];
     }
 
-    const [data, total] = await this.prisma.$transaction([
+    const [data, total] = await Promise.all([
       this.prisma.user.findMany({
         where,
         select: SAFE_SELECT,
@@ -249,6 +248,9 @@ export class UsersService {
       select: SAFE_SELECT,
     });
 
+    // Le changement doit être effectif tout de suite, sans attendre le cache.
+    this.authCache.invalidateUser(id);
+
     // Toute désactivation révoque immédiatement les refresh tokens actifs.
     if (dto.statut === UserStatus.INACTIVE) {
       await this.prisma.refreshToken.updateMany({
@@ -276,7 +278,7 @@ export class UsersService {
   ) {
     const target = await this.findOne(id);
     this.assertCanManage(actor, target);
-    const passwordHash = await bcrypt.hash(dto.password, 12);
+    const passwordHash = await hashPassword(dto.password);
     await this.prisma.user.update({ where: { id }, data: { passwordHash } });
     await this.prisma.refreshToken.updateMany({
       where: { userId: id, revoked: false },

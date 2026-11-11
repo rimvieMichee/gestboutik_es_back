@@ -4,9 +4,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
+import { hashPassword } from '../common/utils/password.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { AuthCacheService } from '../auth/auth-cache.service';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { buildPaginationMeta } from '../common/utils/paginate.util';
@@ -19,6 +20,7 @@ export class BoutiquesService {
   constructor(
     private prisma: PrismaService,
     private auditService: AuditService,
+    private authCache: AuthCacheService,
   ) {}
 
   async create(dto: CreateBoutiqueDto) {
@@ -31,34 +33,37 @@ export class BoutiquesService {
       );
     }
 
-    const adminPasswordHash = await bcrypt.hash(dto.adminPassword, 12);
+    const adminPasswordHash = await hashPassword(dto.adminPassword);
 
-    return this.prisma.$transaction(async (tx) => {
-      const boutique = await tx.boutique.create({
-        data: {
-          nom: dto.nom,
-          description: dto.description,
-          telephone: dto.telephone,
-          email: dto.email,
-          adresse: dto.adresse,
-          ville: dto.ville,
-        },
-      });
+    return this.prisma.$transaction(
+      async (tx) => {
+        const boutique = await tx.boutique.create({
+          data: {
+            nom: dto.nom,
+            description: dto.description,
+            telephone: dto.telephone,
+            email: dto.email,
+            adresse: dto.adresse,
+            ville: dto.ville,
+          },
+        });
 
-      const admin = await tx.user.create({
-        data: {
-          nom: dto.adminNom,
-          prenom: dto.adminPrenom,
-          username: dto.adminUsername,
-          passwordHash: adminPasswordHash,
-          role: Role.ADMIN,
-          boutiqueId: boutique.id,
-        },
-        select: { id: true, nom: true, prenom: true, username: true },
-      });
+        const admin = await tx.user.create({
+          data: {
+            nom: dto.adminNom,
+            prenom: dto.adminPrenom,
+            username: dto.adminUsername,
+            passwordHash: adminPasswordHash,
+            role: Role.ADMIN,
+            boutiqueId: boutique.id,
+          },
+          select: { id: true, nom: true, prenom: true, username: true },
+        });
 
-      return { ...boutique, admin };
-    });
+        return { ...boutique, admin };
+      },
+      { maxWait: 10_000, timeout: 30_000 },
+    );
   }
 
   async findAll(query: PaginationQueryDto) {
@@ -74,7 +79,7 @@ export class BoutiquesService {
         }
       : {};
 
-    const [data, total] = await this.prisma.$transaction([
+    const [data, total] = await Promise.all([
       this.prisma.boutique.findMany({
         where,
         skip: (page - 1) * limit,
@@ -110,6 +115,8 @@ export class BoutiquesService {
       where: { id },
       data: { statut: dto.statut },
     });
+    // Tous les comptes de la boutique doivent être revérifiés immédiatement.
+    this.authCache.clear();
     await this.auditService.record({
       action: 'BOUTIQUE_STATUS_CHANGED',
       entity: 'Boutique',
