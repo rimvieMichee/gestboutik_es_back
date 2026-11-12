@@ -13,6 +13,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { assertSameBoutique } from '../common/utils/tenant-scope.util';
 import { buildPaginationMeta } from '../common/utils/paginate.util';
@@ -24,6 +25,7 @@ export class SalesService {
   constructor(
     private prisma: PrismaService,
     private auditService: AuditService,
+    private realtime: RealtimeService,
   ) {}
 
   async create(user: AuthenticatedUser, dto: CreateSaleDto) {
@@ -44,7 +46,7 @@ export class SalesService {
     }
     const productIds = [...quantitiesByProduct.keys()];
 
-    return this.prisma.$transaction(
+    const { sale, stocks } = await this.prisma.$transaction(
       async (tx) => {
         const products = await tx.product.findMany({
           where: { id: { in: productIds } },
@@ -111,6 +113,7 @@ export class SalesService {
         });
 
         const movements: Prisma.StockMovementCreateManyInput[] = [];
+        const stocks: Array<{ id: string; quantiteDisponible: number }> = [];
         for (const productId of productIds) {
           const quantite = quantitiesByProduct.get(productId)!;
           const product = productsById.get(productId)!;
@@ -137,6 +140,10 @@ export class SalesService {
             saleId: sale.id,
             userId: user.userId,
           });
+          stocks.push({
+            id: productId,
+            quantiteDisponible: product.quantiteDisponible - quantite,
+          });
         }
         // Un seul INSERT pour tous les mouvements de stock.
         await tx.stockMovement.createMany({ data: movements });
@@ -158,10 +165,26 @@ export class SalesService {
           tx,
         );
 
-        return sale;
+        return { sale, stocks };
       },
       { maxWait: 10_000, timeout: 30_000 },
     );
+
+    // Diffusion après validation : écrans de vente et chiffres à jour en direct.
+    for (const product of stocks) {
+      this.realtime.stockUpdated(boutiqueId, product);
+    }
+    this.realtime.saleCreated({
+      saleId: sale.id,
+      numeroVente: sale.numeroVente,
+      montantTotal: Number(sale.montantTotal),
+      isCredit: sale.isCredit,
+      clientNom: sale.clientNom,
+      boutiqueId,
+      userId: user.userId,
+      createdAt: sale.createdAt,
+    });
+    return sale;
   }
 
   async findAll(user: AuthenticatedUser, query: QuerySaleDto) {
@@ -399,6 +422,16 @@ export class SalesService {
         clientNom: sale.clientNom,
         montantTotal: sale.montantTotal.toString(),
       },
+    });
+    this.realtime.creditSettled({
+      saleId: updated.id,
+      numeroVente: updated.numeroVente,
+      montantTotal: Number(updated.montantTotal),
+      isCredit: true,
+      clientNom: updated.clientNom,
+      boutiqueId: updated.boutiqueId,
+      userId: updated.userId,
+      createdAt: updated.createdAt,
     });
     return updated;
   }

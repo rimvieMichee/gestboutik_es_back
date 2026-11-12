@@ -14,6 +14,7 @@ import { StockModule } from './stock/stock.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { MediaModule } from './media/media.module';
 import { PlatformModule } from './platform/platform.module';
+import { RealtimeModule } from './realtime/realtime.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { AppController } from './app.controller';
@@ -23,6 +24,7 @@ import { AppController } from './app.controller';
     ConfigModule.forRoot({ isGlobal: true }),
     ThrottlerModule.forRoot({ throttlers: [{ ttl: 60000, limit: 100 }] }),
     PrismaModule,
+    RealtimeModule,
     AuditModule,
     AuthCacheModule,
     AuthModule,

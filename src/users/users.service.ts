@@ -10,6 +10,7 @@ import { hashPassword } from '../common/utils/password.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthCacheService } from '../auth/auth-cache.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { buildPaginationMeta } from '../common/utils/paginate.util';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -40,6 +41,7 @@ export class UsersService {
     private prisma: PrismaService,
     private auditService: AuditService,
     private authCache: AuthCacheService,
+    private realtime: RealtimeService,
   ) {}
 
   /**
@@ -293,6 +295,9 @@ export class UsersService {
 
     // Le changement doit être effectif tout de suite, sans attendre le cache.
     this.authCache.invalidateUser(id);
+    if (dto.statut === UserStatus.INACTIVE) {
+      this.realtime.disconnectUser(id);
+    }
 
     // Toute désactivation révoque immédiatement les refresh tokens actifs.
     if (dto.statut === UserStatus.INACTIVE) {
@@ -335,6 +340,8 @@ export class UsersService {
       boutiqueId: target.boutiqueId,
       metadata: { username: target.username },
     });
+    // Ses appareils doivent se reconnecter avec le nouveau mot de passe.
+    this.realtime.disconnectUser(id);
     return { success: true };
   }
 }

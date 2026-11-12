@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import {
   resolveBoutiqueScope,
@@ -17,7 +18,10 @@ import { QueryStockMovementDto } from './dto/query-stock-movement.dto';
 
 @Injectable()
 export class StockService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private realtime: RealtimeService,
+  ) {}
 
   restock(actor: AuthenticatedUser, dto: RestockDto) {
     return this.applyMovement(
@@ -46,7 +50,7 @@ export class StockService {
     type: StockMovementType,
     note?: string,
   ) {
-    return this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const product = await tx.product.findUnique({ where: { id: productId } });
       if (!product) {
         throw new NotFoundException('Produit introuvable.');
@@ -85,6 +89,10 @@ export class StockService {
 
       return tx.product.findUnique({ where: { id: productId } });
     });
+    if (updated) {
+      this.realtime.stockUpdated(updated.boutiqueId, updated);
+    }
+    return updated;
   }
 
   async findMovements(user: AuthenticatedUser, query: QueryStockMovementDto) {

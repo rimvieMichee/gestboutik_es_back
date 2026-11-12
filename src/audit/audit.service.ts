@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeService } from '../realtime/realtime.service';
 
 type TransactionClient = Prisma.TransactionClient;
 
@@ -15,7 +16,10 @@ export interface AuditEntry {
 
 @Injectable()
 export class AuditService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private realtime: RealtimeService,
+  ) {}
 
   // `client` permet d'insérer la ligne d'audit dans la même transaction Prisma que l'action auditée,
   // afin qu'un rollback (ex: vente annulée pour stock insuffisant) annule aussi son audit log.
@@ -23,7 +27,7 @@ export class AuditService {
     entry: AuditEntry,
     client: TransactionClient | PrismaService = this.prisma,
   ) {
-    return client.auditLog.create({
+    const created = client.auditLog.create({
       data: {
         action: entry.action,
         entity: entry.entity,
@@ -33,5 +37,13 @@ export class AuditService {
         metadata: entry.metadata,
       },
     });
+    // Hors transaction, l'écriture est déjà validée : on prévient le technicien
+    // en direct. Dans une transaction, c'est à l'appelant d'émettre après le commit.
+    if (client === this.prisma) {
+      void created
+        .then(() => this.realtime.activity(entry.action, entry.boutiqueId))
+        .catch(() => undefined);
+    }
+    return created;
   }
 }

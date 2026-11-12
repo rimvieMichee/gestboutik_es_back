@@ -8,6 +8,7 @@ import { hashPassword } from '../common/utils/password.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthCacheService } from '../auth/auth-cache.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { QueryBoutiqueDto } from './dto/query-boutique.dto';
 import {
@@ -28,6 +29,7 @@ export class BoutiquesService {
     private prisma: PrismaService,
     private auditService: AuditService,
     private authCache: AuthCacheService,
+    private realtime: RealtimeService,
   ) {}
 
   async create(dto: CreateBoutiqueDto) {
@@ -42,7 +44,7 @@ export class BoutiquesService {
 
     const adminPasswordHash = await hashPassword(dto.adminPassword);
 
-    return this.prisma.$transaction(
+    const created = await this.prisma.$transaction(
       async (tx) => {
         const boutique = await tx.boutique.create({
           data: {
@@ -83,6 +85,10 @@ export class BoutiquesService {
       },
       { maxWait: 10_000, timeout: 30_000 },
     );
+    // L'audit de la création est écrit dans la transaction : on prévient le
+    // technicien en direct une fois celle-ci validée.
+    this.realtime.activity('BOUTIQUE_CREATED', created.id);
+    return created;
   }
 
   async findAll(query: QueryBoutiqueDto) {
@@ -401,6 +407,9 @@ export class BoutiquesService {
     });
     // Tous les comptes de la boutique doivent être revérifiés immédiatement.
     this.authCache.clear();
+    if (dto.statut === 'INACTIVE') {
+      this.realtime.disconnectBoutique(id);
+    }
     await this.auditService.record({
       action: 'BOUTIQUE_STATUS_CHANGED',
       entity: 'Boutique',

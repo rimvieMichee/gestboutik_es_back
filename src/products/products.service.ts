@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, ProductStatus, Role, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import {
   resolveBoutiqueScope,
@@ -18,7 +19,10 @@ import { QueryProductDto } from './dto/query-product.dto';
 
 @Injectable()
 export class ProductsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private realtime: RealtimeService,
+  ) {}
 
   async create(actor: AuthenticatedUser, dto: CreateProductDto) {
     if (!actor.boutiqueId) {
@@ -30,7 +34,7 @@ export class ProductsService {
 
     const quantiteInitiale = dto.quantiteDisponible ?? 0;
 
-    return this.prisma.$transaction(async (tx) => {
+    const created = await this.prisma.$transaction(async (tx) => {
       const product = await tx.product.create({
         data: {
           nom: dto.nom,
@@ -60,6 +64,9 @@ export class ProductsService {
 
       return product;
     });
+    this.realtime.productChanged(boutiqueId, created.id, 'created');
+    this.realtime.stockUpdated(boutiqueId, created);
+    return created;
   }
 
   async findAll(user: AuthenticatedUser, query: QueryProductDto) {
@@ -114,7 +121,12 @@ export class ProductsService {
       throw new NotFoundException('Produit introuvable.');
     }
     assertSameBoutique(actor, product.boutiqueId);
-    return this.prisma.product.update({ where: { id }, data: dto });
+    const updated = await this.prisma.product.update({
+      where: { id },
+      data: dto,
+    });
+    this.realtime.productChanged(updated.boutiqueId, id, 'updated');
+    return updated;
   }
 
   async changeStatus(
@@ -127,9 +139,16 @@ export class ProductsService {
       throw new NotFoundException('Produit introuvable.');
     }
     assertSameBoutique(actor, product.boutiqueId);
-    return this.prisma.product.update({
+    const updated = await this.prisma.product.update({
       where: { id },
       data: { statut: dto.statut },
     });
+    this.realtime.productChanged(
+      updated.boutiqueId,
+      id,
+      updated.statut === 'INACTIVE' ? 'archived' : 'restored',
+    );
+    this.realtime.stockUpdated(updated.boutiqueId, updated);
+    return updated;
   }
 }
