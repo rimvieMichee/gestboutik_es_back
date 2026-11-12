@@ -41,6 +41,11 @@ export class CreateBoutiqueDto {
   @IsNotEmpty()
   adminPrenom: string;
 
+  // Numéro du gestionnaire : affiché en en-tête de ses rapports PDF.
+  @IsOptional()
+  @IsString()
+  adminTelephone?: string;
+
   @IsString()
   @IsNotEmpty()
   adminUsername: string;

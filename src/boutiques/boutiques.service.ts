@@ -70,6 +70,7 @@ export class BoutiquesService {
           data: {
             nom: dto.adminNom,
             prenom: dto.adminPrenom,
+            telephone: dto.adminTelephone,
             username: dto.adminUsername,
             passwordHash: adminPasswordHash,
             role: Role.ADMIN,
