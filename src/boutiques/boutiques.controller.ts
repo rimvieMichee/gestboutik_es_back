@@ -15,7 +15,7 @@ import { BoutiquesService } from './boutiques.service';
 import { CreateBoutiqueDto } from './dto/create-boutique.dto';
 import { UpdateBoutiqueDto } from './dto/update-boutique.dto';
 import { ChangeBoutiqueStatusDto } from './dto/change-status.dto';
-import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { QueryBoutiqueDto } from './dto/query-boutique.dto';
 
 @Controller('boutiques')
 export class BoutiquesController {
@@ -35,8 +35,14 @@ export class BoutiquesController {
 
   @Roles(Role.SUPER_ADMIN)
   @Get()
-  findAll(@Query() query: PaginationQueryDto) {
+  findAll(@Query() query: QueryBoutiqueDto) {
     return this.boutiquesService.findAll(query);
+  }
+
+  @Roles(Role.SUPER_ADMIN)
+  @Get(':id/overview')
+  overview(@Param('id') id: string) {
+    return this.boutiquesService.overview(id);
   }
 
   @Roles(Role.SUPER_ADMIN)

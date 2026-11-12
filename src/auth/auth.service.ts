@@ -5,6 +5,7 @@ import { BoutiqueStatus, Role, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import { hashPassword, needsRehash } from '../common/utils/password.util';
 import { LoginDto } from './dto/login.dto';
 import { JwtPayload } from './types/authenticated-user.type';
@@ -20,6 +21,7 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private config: ConfigService,
+    private auditService: AuditService,
   ) {}
 
   async login(dto: LoginDto) {
@@ -65,6 +67,18 @@ export class AuthService {
       role: user.role,
       boutiqueId: user.boutiqueId,
     });
+
+    // Trace de connexion (« dernière connexion » du suivi technicien), sans
+    // faire attendre la réponse.
+    void this.auditService
+      .record({
+        action: 'USER_LOGIN',
+        entity: 'User',
+        entityId: user.id,
+        userId: user.id,
+        boutiqueId: user.boutiqueId,
+      })
+      .catch(() => undefined);
 
     return {
       ...tokens,

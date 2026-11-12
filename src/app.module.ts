@@ -13,6 +13,7 @@ import { SalesModule } from './sales/sales.module';
 import { StockModule } from './stock/stock.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { MediaModule } from './media/media.module';
+import { PlatformModule } from './platform/platform.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { AppController } from './app.controller';
@@ -32,6 +33,7 @@ import { AppController } from './app.controller';
     StockModule,
     DashboardModule,
     MediaModule,
+    PlatformModule,
   ],
   controllers: [AppController],
   providers: [

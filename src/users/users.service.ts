@@ -85,7 +85,7 @@ export class UsersService {
       throw new NotFoundException('Boutique introuvable.');
     }
 
-    return this.prisma.user.create({
+    const created = await this.prisma.user.create({
       data: {
         // Ajout rapide : à défaut de nom/prénom, on retombe sur l'identifiant
         // (modifiable ensuite via la fiche du compte).
@@ -100,6 +100,15 @@ export class UsersService {
       },
       select: SAFE_SELECT,
     });
+    await this.auditService.record({
+      action: 'USER_CREATED',
+      entity: 'User',
+      entityId: created.id,
+      userId: actor.userId,
+      boutiqueId,
+      metadata: { username: created.username, role },
+    });
+    return created;
   }
 
   /**
@@ -141,6 +150,9 @@ export class UsersService {
       throw new ForbiddenException('Action non autorisée.');
     }
 
+    if (query.statut) {
+      where.statut = query.statut;
+    }
     if (query.search) {
       where.OR = [
         { nom: { contains: query.search, mode: 'insensitive' } },
@@ -160,7 +172,29 @@ export class UsersService {
       this.prisma.user.count({ where }),
     ]);
 
-    return { data, meta: buildPaginationMeta(page, limit, total) };
+    // Le technicien suit aussi la dernière connexion de chaque gestionnaire.
+    let enriched: Array<
+      (typeof data)[number] & { derniereConnexion?: Date | null }
+    > = data;
+    if (actor.role === Role.SUPER_ADMIN && data.length) {
+      const logins = await this.prisma.auditLog.groupBy({
+        by: ['userId'],
+        where: {
+          action: 'USER_LOGIN',
+          userId: { in: data.map((u) => u.id) },
+        },
+        _max: { createdAt: true },
+      });
+      const lastLogin = new Map(
+        logins.map((l) => [l.userId, l._max.createdAt]),
+      );
+      enriched = data.map((u) => ({
+        ...u,
+        derniereConnexion: lastLogin.get(u.id) ?? null,
+      }));
+    }
+
+    return { data: enriched, meta: buildPaginationMeta(page, limit, total) };
   }
 
   async updateMe(userId: string, dto: UpdateMeDto) {
@@ -292,6 +326,14 @@ export class UsersService {
     await this.prisma.refreshToken.updateMany({
       where: { userId: id, revoked: false },
       data: { revoked: true },
+    });
+    await this.auditService.record({
+      action: 'USER_PASSWORD_RESET',
+      entity: 'User',
+      entityId: id,
+      userId: actor.userId,
+      boutiqueId: target.boutiqueId,
+      metadata: { username: target.username },
     });
     return { success: true };
   }
