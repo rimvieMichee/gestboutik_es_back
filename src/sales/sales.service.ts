@@ -315,10 +315,22 @@ export class SalesService {
         "Aucune boutique n'est associée à ce compte.",
       );
     }
+    // Portée consolidée : toutes les boutiques auxquelles le gestionnaire est rattaché.
+    let boutiqueIds = [user.boutiqueId];
+    if (query.scope === 'all') {
+      const rows = await this.prisma.userBoutique.findMany({
+        where: { userId: user.userId },
+        select: { boutiqueId: true },
+      });
+      boutiqueIds = Array.from(
+        new Set([user.boutiqueId, ...rows.map((r) => r.boutiqueId)]),
+      );
+    }
+    const consolidated = query.scope === 'all' && boutiqueIds.length > 1;
     const where: Prisma.SaleWhereInput = {
-      boutiqueId: user.boutiqueId,
+      boutiqueId: { in: boutiqueIds },
       statut: SaleStatus.COMPLETED,
-      userId: query.userId,
+      userId: consolidated ? undefined : query.userId,
       ...(query.dateFrom || query.dateTo
         ? {
             createdAt: {
@@ -345,10 +357,15 @@ export class SalesService {
         include: {
           items: { include: { product: { select: { nom: true } } } },
           user: { select: { nom: true, prenom: true } },
+          boutique: { select: { id: true, nom: true } },
         },
       }),
     ]);
 
+    const parBoutique = new Map<
+      string,
+      { boutiqueId: string; nom: string; nombreVentes: number; chiffreAffaires: Prisma.Decimal; creditDu: Prisma.Decimal }
+    >();
     let total = new Prisma.Decimal(0);
     let encaisse = new Prisma.Decimal(0);
     let creditDu = new Prisma.Decimal(0);
@@ -358,6 +375,17 @@ export class SalesService {
       total = total.add(sale.montantTotal);
       if (credit) creditDu = creditDu.add(sale.montantTotal);
       else encaisse = encaisse.add(sale.montantTotal);
+      const row = parBoutique.get(sale.boutiqueId) ?? {
+        boutiqueId: sale.boutiqueId,
+        nom: sale.boutique.nom,
+        nombreVentes: 0,
+        chiffreAffaires: new Prisma.Decimal(0),
+        creditDu: new Prisma.Decimal(0),
+      };
+      row.nombreVentes += 1;
+      row.chiffreAffaires = row.chiffreAffaires.add(sale.montantTotal);
+      if (credit) row.creditDu = row.creditDu.add(sale.montantTotal);
+      parBoutique.set(sale.boutiqueId, row);
       const lignes = sale.items.map((item) => {
         articles += item.quantite;
         return {
@@ -375,12 +403,37 @@ export class SalesService {
         statut: credit ? 'CREDIT' : 'PAYE',
         clientNom: sale.clientNom,
         vendeur: `${sale.user.prenom} ${sale.user.nom}`.trim(),
+        boutique: sale.boutique.nom,
         lignes,
       };
     });
 
+    // Une ligne par boutique, même celles sans vente sur la période.
+    let parBoutiqueListe: unknown[] | undefined;
+    if (consolidated) {
+      const shops = await this.prisma.boutique.findMany({
+        where: { id: { in: boutiqueIds } },
+        select: { id: true, nom: true },
+        orderBy: { nom: 'asc' },
+      });
+      parBoutiqueListe = shops.map(
+        (b) =>
+          parBoutique.get(b.id) ?? {
+            boutiqueId: b.id,
+            nom: b.nom,
+            nombreVentes: 0,
+            chiffreAffaires: 0,
+            creditDu: 0,
+          },
+      );
+    }
+
     return {
-      boutique,
+      boutique: consolidated
+        ? { nom: 'Toutes mes boutiques', telephone: null, adresse: null, ville: null }
+        : boutique,
+      consolide: consolidated,
+      parBoutique: parBoutiqueListe,
       gestionnaire,
       totaux: {
         nombreVentes: sales.length,

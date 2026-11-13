@@ -39,4 +39,9 @@ export class SummarySaleQueryDto {
   @IsOptional()
   @IsString()
   userId?: string;
+
+  // « all » : rapport consolidé de toutes les boutiques du gestionnaire.
+  @IsOptional()
+  @IsIn(['all'])
+  scope?: 'all';
 }
