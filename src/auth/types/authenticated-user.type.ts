@@ -5,7 +5,10 @@ export interface AuthenticatedUser {
   userId: string;
   username: string;
   role: Role;
+  /** Boutique active de cette session (celle du jeton pour un gestionnaire). */
   boutiqueId: string | null;
+  /** Boutiques actives gérées par ce gestionnaire (ADMIN), dont la boutique active. */
+  boutiqueIds?: string[];
 }
 
 export interface JwtPayload {

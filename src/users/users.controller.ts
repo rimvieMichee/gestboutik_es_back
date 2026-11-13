@@ -5,6 +5,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
@@ -18,6 +19,7 @@ import { UpdateMeDto } from './dto/update-me.dto';
 import { ChangeUserStatusDto } from './dto/change-status.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { QueryUserDto } from './dto/query-user.dto';
+import { SetUserBoutiquesDto } from './dto/set-user-boutiques.dto';
 
 @Controller('users')
 export class UsersController {
@@ -70,6 +72,17 @@ export class UsersController {
     @Body() dto: UpdateUserDto,
   ) {
     return this.usersService.update(actor, id, dto);
+  }
+
+  // Technicien : boutiques qu'un gestionnaire peut ouvrir.
+  @Roles(Role.SUPER_ADMIN)
+  @Put(':id/boutiques')
+  setBoutiques(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: SetUserBoutiquesDto,
+  ) {
+    return this.usersService.setBoutiques(actor, id, dto);
   }
 
   @Roles(Role.SUPER_ADMIN, Role.ADMIN)

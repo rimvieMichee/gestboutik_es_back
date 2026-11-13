@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsEmail,
   IsNotEmpty,
   IsOptional,
@@ -40,4 +41,11 @@ export class CreateUserDto {
   @IsOptional()
   @IsString()
   boutiqueId?: string;
+
+  // SUPER_ADMIN créant un ADMIN : boutiques supplémentaires qu'il gérera
+  // (la première boutique, boutiqueId, reste sa boutique par défaut).
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  boutiqueIds?: string[];
 }

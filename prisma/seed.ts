@@ -55,6 +55,7 @@ async function main() {
       passwordHash: managerPasswordHash,
       role: Role.ADMIN,
       boutiqueId: boutique.id,
+      boutiques: { create: { boutiqueId: boutique.id } },
     },
   });
 
@@ -118,7 +119,21 @@ async function main() {
       passwordHash: managerPasswordHash,
       role: Role.ADMIN,
       boutiqueId: boutique2.id,
+      boutiques: { create: { boutiqueId: boutique2.id } },
     },
+  });
+
+  // gestionnaire1 gère aussi la Boutique Nord : de quoi essayer le changement
+  // de boutique dans l'appli.
+  const manager1 = await prisma.user.findUniqueOrThrow({
+    where: { username: 'gestionnaire1' },
+  });
+  await prisma.userBoutique.upsert({
+    where: {
+      userId_boutiqueId: { userId: manager1.id, boutiqueId: boutique2.id },
+    },
+    update: {},
+    create: { userId: manager1.id, boutiqueId: boutique2.id },
   });
 
   const employee2PasswordHash = await bcrypt.hash('Employee123!', 12);

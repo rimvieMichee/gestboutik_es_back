@@ -17,6 +17,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { ChangeUserStatusDto } from './dto/change-status.dto';
+import { SetUserBoutiquesDto } from './dto/set-user-boutiques.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { QueryUserDto } from './dto/query-user.dto';
 
@@ -33,7 +34,24 @@ const SAFE_SELECT = {
   createdAt: true,
   updatedAt: true,
   boutique: { select: { id: true, nom: true, statut: true } },
+  // Boutiques gérées (gestionnaires) : voir shape().
+  boutiques: {
+    select: {
+      boutique: { select: { id: true, nom: true, ville: true, statut: true } },
+    },
+    orderBy: { createdAt: 'asc' },
+  },
 } satisfies Prisma.UserSelect;
+
+type UserRow = Prisma.UserGetPayload<{ select: typeof SAFE_SELECT }>;
+
+/** Aplatit les rattachements : `boutiques` devient une liste de boutiques. */
+function shape(user: UserRow) {
+  return {
+    ...user,
+    boutiques: user.boutiques.map((m) => m.boutique),
+  };
+}
 
 @Injectable()
 export class UsersService {
@@ -53,15 +71,20 @@ export class UsersService {
   async create(actor: AuthenticatedUser, dto: CreateUserDto) {
     let role: Role;
     let boutiqueId: string;
+    // Boutiques gérées par le nouveau compte (plusieurs possibles pour un ADMIN).
+    let boutiqueIds: string[];
 
     if (actor.role === Role.SUPER_ADMIN) {
       role = Role.ADMIN;
-      if (!dto.boutiqueId) {
+      boutiqueIds = Array.from(
+        new Set([dto.boutiqueId, ...(dto.boutiqueIds ?? [])].filter(Boolean)),
+      ) as string[];
+      if (!boutiqueIds.length) {
         throw new BadRequestException(
           'Un ADMIN doit être rattaché à une boutique.',
         );
       }
-      boutiqueId = dto.boutiqueId;
+      boutiqueId = boutiqueIds[0];
     } else if (actor.role === Role.ADMIN) {
       if (!actor.boutiqueId) {
         throw new ForbiddenException(
@@ -70,20 +93,21 @@ export class UsersService {
       }
       role = Role.EMPLOYEE;
       boutiqueId = actor.boutiqueId;
+      boutiqueIds = [boutiqueId];
     } else {
       throw new ForbiddenException('Action non autorisée.');
     }
 
     // Vérifications et hachage en parallèle : trois attentes au lieu de les enchaîner.
-    const [existing, boutique, passwordHash] = await Promise.all([
+    const [existing, boutiquesFound, passwordHash] = await Promise.all([
       this.prisma.user.findUnique({ where: { username: dto.username } }),
-      this.prisma.boutique.findUnique({ where: { id: boutiqueId } }),
+      this.prisma.boutique.count({ where: { id: { in: boutiqueIds } } }),
       hashPassword(dto.password),
     ]);
     if (existing) {
       throw new ConflictException('Ce nom d’utilisateur est déjà utilisé.');
     }
-    if (!boutique) {
+    if (boutiquesFound !== boutiqueIds.length) {
       throw new NotFoundException('Boutique introuvable.');
     }
 
@@ -99,6 +123,13 @@ export class UsersService {
         passwordHash,
         role,
         boutiqueId,
+        ...(role === Role.ADMIN
+          ? {
+              boutiques: {
+                create: boutiqueIds.map((id) => ({ boutiqueId: id })),
+              },
+            }
+          : {}),
       },
       select: SAFE_SELECT,
     });
@@ -110,7 +141,59 @@ export class UsersService {
       boutiqueId,
       metadata: { username: created.username, role },
     });
-    return created;
+    return shape(created);
+  }
+
+  /**
+   * Le technicien choisit les boutiques qu'un gestionnaire peut ouvrir. La
+   * boutique par défaut reste la sienne tant qu'elle fait partie de la liste.
+   */
+  async setBoutiques(
+    actor: AuthenticatedUser,
+    id: string,
+    dto: SetUserBoutiquesDto,
+  ) {
+    const target = await this.findOne(id);
+    this.assertCanManage(actor, target);
+
+    const ids = Array.from(new Set(dto.boutiqueIds));
+    const found = await this.prisma.boutique.count({
+      where: { id: { in: ids } },
+    });
+    if (found !== ids.length) {
+      throw new NotFoundException('Boutique introuvable.');
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.userBoutique.deleteMany({
+        where: { userId: id, boutiqueId: { notIn: ids } },
+      }),
+      this.prisma.userBoutique.createMany({
+        data: ids.map((boutiqueId) => ({ userId: id, boutiqueId })),
+        skipDuplicates: true,
+      }),
+      this.prisma.user.update({
+        where: { id },
+        data: {
+          boutiqueId:
+            target.boutiqueId && ids.includes(target.boutiqueId)
+              ? target.boutiqueId
+              : ids[0],
+        },
+      }),
+    ]);
+    // Les sessions ouvertes sur une boutique retirée doivent le savoir tout de suite.
+    this.authCache.invalidateUser(id);
+    this.realtime.disconnectUser(id);
+
+    await this.auditService.record({
+      action: 'USER_BOUTIQUES_CHANGED',
+      entity: 'User',
+      entityId: id,
+      userId: actor.userId,
+      metadata: { boutiqueIds: ids },
+    });
+    return this.findOne(id);
   }
 
   /**
@@ -144,7 +227,9 @@ export class UsersService {
     if (actor.role === Role.SUPER_ADMIN) {
       where = {
         role: Role.ADMIN,
-        ...(query.boutiqueId ? { boutiqueId: query.boutiqueId } : {}),
+        ...(query.boutiqueId
+          ? { boutiques: { some: { boutiqueId: query.boutiqueId } } }
+          : {}),
       };
     } else if (actor.role === Role.ADMIN) {
       where = { role: Role.EMPLOYEE, boutiqueId: actor.boutiqueId };
@@ -175,9 +260,10 @@ export class UsersService {
     ]);
 
     // Le technicien suit aussi la dernière connexion de chaque gestionnaire.
+    const rows = data.map(shape);
     let enriched: Array<
-      (typeof data)[number] & { derniereConnexion?: Date | null }
-    > = data;
+      (typeof rows)[number] & { derniereConnexion?: Date | null }
+    > = rows;
     if (actor.role === Role.SUPER_ADMIN && data.length) {
       const logins = await this.prisma.auditLog.groupBy({
         by: ['userId'],
@@ -190,7 +276,7 @@ export class UsersService {
       const lastLogin = new Map(
         logins.map((l) => [l.userId, l._max.createdAt]),
       );
-      enriched = data.map((u) => ({
+      enriched = rows.map((u) => ({
         ...u,
         derniereConnexion: lastLogin.get(u.id) ?? null,
       }));
@@ -215,7 +301,7 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException('Utilisateur introuvable.');
     }
-    return user;
+    return shape(user);
   }
 
   async findOneManaged(actor: AuthenticatedUser, id: string) {
@@ -267,7 +353,7 @@ export class UsersService {
     const target = await this.findOne(id);
     this.assertCanManage(actor, target);
 
-    return this.prisma.user.update({
+    const updated = await this.prisma.user.update({
       where: { id },
       data: {
         nom: dto.nom,
@@ -278,6 +364,7 @@ export class UsersService {
       },
       select: SAFE_SELECT,
     });
+    return shape(updated);
   }
 
   async changeStatus(
@@ -287,11 +374,12 @@ export class UsersService {
   ) {
     const target = await this.findOne(id);
     this.assertCanManage(actor, target);
-    const user = await this.prisma.user.update({
+    const row = await this.prisma.user.update({
       where: { id },
       data: { statut: dto.statut },
       select: SAFE_SELECT,
     });
+    const user = shape(row);
 
     // Le changement doit être effectif tout de suite, sans attendre le cache.
     this.authCache.invalidateUser(id);

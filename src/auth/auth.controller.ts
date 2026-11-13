@@ -1,4 +1,6 @@
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Role } from '@prisma/client';
+import { Roles } from '../common/decorators/roles.decorator';
 import { Throttle } from '@nestjs/throttler';
 import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -6,6 +8,7 @@ import type { AuthenticatedUser } from './types/authenticated-user.type';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { SwitchBoutiqueDto } from './dto/switch-boutique.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -23,6 +26,18 @@ export class AuthController {
   @Post('refresh')
   refresh(@Body() dto: RefreshTokenDto) {
     return this.authService.refresh(dto.refreshToken);
+  }
+
+  // Gestionnaire : ouvrir une autre de ses boutiques.
+  @Roles(Role.ADMIN)
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('switch-boutique')
+  switchBoutique(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: SwitchBoutiqueDto,
+  ) {
+    return this.authService.switchBoutique(user.userId, dto);
   }
 
   @HttpCode(HttpStatus.OK)

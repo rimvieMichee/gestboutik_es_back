@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -33,16 +34,40 @@ export class BoutiquesService {
   ) {}
 
   async create(dto: CreateBoutiqueDto) {
-    const existing = await this.prisma.user.findUnique({
-      where: { username: dto.adminUsername },
-    });
-    if (existing) {
-      throw new ConflictException(
-        'Ce nom d’utilisateur (admin) est déjà utilisé.',
+    // Soit on rattache un gestionnaire déjà existant (qui gérera alors plusieurs
+    // boutiques), soit on crée son compte en même temps que la boutique.
+    if (dto.adminUserId) {
+      const manager = await this.prisma.user.findUnique({
+        where: { id: dto.adminUserId },
+        select: { id: true, role: true },
+      });
+      if (!manager || manager.role !== Role.ADMIN) {
+        throw new NotFoundException('Gestionnaire introuvable.');
+      }
+    } else if (
+      !dto.adminNom ||
+      !dto.adminPrenom ||
+      !dto.adminUsername ||
+      !dto.adminPassword
+    ) {
+      throw new BadRequestException(
+        'Indiquez un gestionnaire existant ou les informations du nouveau.',
       );
     }
+    if (!dto.adminUserId) {
+      const existing = await this.prisma.user.findUnique({
+        where: { username: dto.adminUsername },
+      });
+      if (existing) {
+        throw new ConflictException(
+          'Ce nom d’utilisateur (admin) est déjà utilisé.',
+        );
+      }
+    }
 
-    const adminPasswordHash = await hashPassword(dto.adminPassword);
+    const adminPasswordHash = dto.adminUserId
+      ? null
+      : await hashPassword(dto.adminPassword as string);
 
     const created = await this.prisma.$transaction(
       async (tx) => {
@@ -63,23 +88,44 @@ export class BoutiquesService {
             entity: 'Boutique',
             entityId: boutique.id,
             boutiqueId: boutique.id,
-            metadata: { nom: boutique.nom, gestionnaire: dto.adminUsername },
+            metadata: {
+              nom: boutique.nom,
+              gestionnaire: dto.adminUsername ?? dto.adminUserId,
+            },
           },
           tx,
         );
 
-        const admin = await tx.user.create({
-          data: {
-            nom: dto.adminNom,
-            prenom: dto.adminPrenom,
-            telephone: dto.adminTelephone,
-            username: dto.adminUsername,
-            passwordHash: adminPasswordHash,
-            role: Role.ADMIN,
-            boutiqueId: boutique.id,
-          },
-          select: { id: true, nom: true, prenom: true, username: true },
-        });
+        let admin: {
+          id: string;
+          nom: string;
+          prenom: string;
+          username: string;
+        };
+        if (dto.adminUserId) {
+          admin = await tx.user.findUniqueOrThrow({
+            where: { id: dto.adminUserId },
+            select: { id: true, nom: true, prenom: true, username: true },
+          });
+          await tx.userBoutique.create({
+            data: { userId: admin.id, boutiqueId: boutique.id },
+          });
+        } else {
+          admin = await tx.user.create({
+            data: {
+              nom: dto.adminNom as string,
+              prenom: dto.adminPrenom as string,
+              telephone: dto.adminTelephone,
+              username: dto.adminUsername as string,
+              passwordHash: adminPasswordHash as string,
+              role: Role.ADMIN,
+              boutiqueId: boutique.id,
+              boutiques: { create: { boutiqueId: boutique.id } },
+            },
+            select: { id: true, nom: true, prenom: true, username: true },
+          });
+        }
+        this.authCache.invalidateUser(admin.id);
 
         return { ...boutique, admin };
       },
@@ -136,7 +182,12 @@ export class BoutiquesService {
     const [users, products, salesMonth, lastSales, credits] = await Promise.all(
       [
         this.prisma.user.findMany({
-          where: { boutiqueId: { in: ids } },
+          where: {
+            OR: [
+              { role: Role.EMPLOYEE, boutiqueId: { in: ids } },
+              { role: Role.ADMIN, boutiques: { some: { boutiqueId: { in: ids } } } },
+            ],
+          },
           select: {
             id: true,
             nom: true,
@@ -146,6 +197,7 @@ export class BoutiquesService {
             role: true,
             statut: true,
             boutiqueId: true,
+            boutiques: { select: { boutiqueId: true } },
           },
           orderBy: { createdAt: 'asc' },
         }),
@@ -175,7 +227,12 @@ export class BoutiquesService {
     );
 
     return boutiques.map((boutique) => {
-      const mine = users.filter((u) => u.boutiqueId === boutique.id);
+      // Un employé a une boutique ; un gestionnaire peut en gérer plusieurs.
+      const mine = users.filter((u) =>
+        u.role === Role.ADMIN
+          ? u.boutiques.some((m) => m.boutiqueId === boutique.id)
+          : u.boutiqueId === boutique.id,
+      );
       const month = salesMonth.find((r) => r.boutiqueId === boutique.id);
       const credit = credits.find((r) => r.boutiqueId === boutique.id);
       return {
@@ -197,6 +254,69 @@ export class BoutiquesService {
           derniereVente:
             lastSales.find((r) => r.boutiqueId === boutique.id)?._max
               .createdAt ?? null,
+        },
+      };
+    });
+  }
+
+  /**
+   * Les boutiques d'un gestionnaire, avec de quoi choisir d'un coup d'œil :
+   * ventes du jour et crédits à encaisser de chacune (sélecteur de l'appli).
+   */
+  async mine(user: AuthenticatedUser) {
+    const rows = await this.prisma.userBoutique.findMany({
+      where: { userId: user.userId },
+      include: { boutique: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    // Compte antérieur au rattachement multiple : sa boutique reste la sienne.
+    const memberships = [...rows];
+    if (user.boutiqueId && !rows.some((m) => m.boutiqueId === user.boutiqueId)) {
+      const own = await this.prisma.boutique.findUnique({
+        where: { id: user.boutiqueId },
+      });
+      if (own) {
+        memberships.unshift({
+          userId: user.userId,
+          boutiqueId: own.id,
+          createdAt: own.createdAt,
+          boutique: own,
+        });
+      }
+    }
+    const ids = memberships.map((m) => m.boutiqueId);
+    if (!ids.length) return [];
+    const completed = { statut: SaleStatus.COMPLETED, boutiqueId: { in: ids } };
+    const [today, credits] = await Promise.all([
+      this.prisma.sale.groupBy({
+        by: ['boutiqueId'],
+        where: { ...completed, createdAt: { gte: startOfDayUtc() } },
+        _count: { _all: true },
+        _sum: { montantTotal: true },
+      }),
+      this.prisma.sale.groupBy({
+        by: ['boutiqueId'],
+        where: { ...completed, isCredit: true, creditRegleAt: null },
+        _count: { _all: true },
+        _sum: { montantTotal: true },
+      }),
+    ]);
+    return memberships.map((m) => {
+      const t = today.find((r) => r.boutiqueId === m.boutiqueId);
+      const c = credits.find((r) => r.boutiqueId === m.boutiqueId);
+      return {
+        id: m.boutique.id,
+        nom: m.boutique.nom,
+        ville: m.boutique.ville,
+        statut: m.boutique.statut,
+        active: m.boutiqueId === user.boutiqueId,
+        aujourdhui: {
+          ventes: t?._count._all ?? 0,
+          chiffreAffaires: Number(t?._sum.montantTotal ?? 0),
+        },
+        creditEnCours: {
+          nombre: c?._count._all ?? 0,
+          montant: Number(c?._sum.montantTotal ?? 0),
         },
       };
     });
@@ -240,7 +360,12 @@ export class BoutiquesService {
       activite,
     ] = await Promise.all([
       this.prisma.user.findMany({
-        where: { boutiqueId: id },
+        where: {
+          OR: [
+            { role: Role.EMPLOYEE, boutiqueId: id },
+            { role: Role.ADMIN, boutiques: { some: { boutiqueId: id } } },
+          ],
+        },
         select: {
           id: true,
           nom: true,

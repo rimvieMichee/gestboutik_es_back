@@ -22,6 +22,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   validate(payload: JwtPayload): Promise<AuthenticatedUser> {
-    return this.validator.validate(payload.sub);
+    // La boutique active vient du jeton : deux appareils d'un même gestionnaire
+    // peuvent travailler sur deux boutiques différentes.
+    return this.validator.validate(payload.sub, payload.boutiqueId);
   }
 }

@@ -27,6 +27,13 @@ export class BoutiquesController {
     return this.boutiquesService.findOne(user.boutiqueId as string);
   }
 
+  // Gestionnaire : toutes ses boutiques, avec leurs chiffres du jour.
+  @Roles(Role.ADMIN)
+  @Get('mine')
+  async mine(@CurrentUser() user: AuthenticatedUser) {
+    return { data: await this.boutiquesService.mine(user) };
+  }
+
   @Roles(Role.SUPER_ADMIN)
   @Post()
   create(@Body() dto: CreateBoutiqueDto) {

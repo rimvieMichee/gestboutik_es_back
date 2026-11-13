@@ -61,7 +61,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection {
       const payload = await this.jwt.verifyAsync<JwtPayload>(token, {
         secret: this.config.get<string>('JWT_ACCESS_SECRET'),
       });
-      const user = await this.validator.validate(payload.sub);
+      const user = await this.validator.validate(payload.sub, payload.boutiqueId);
 
       // Chaque compte n'entre que dans les salons qui lui correspondent.
       const rooms: string[] = [Rooms.user(user.userId)];

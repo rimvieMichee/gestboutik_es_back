@@ -1,5 +1,18 @@
 import { Injectable } from '@nestjs/common';
-import type { AuthenticatedUser } from './types/authenticated-user.type';
+import type { Role } from '@prisma/client';
+
+/** État vérifié d'un compte, indépendant de la boutique active choisie par la session. */
+export interface CachedAccount {
+  userId: string;
+  username: string;
+  role: Role;
+  /** Boutique par défaut (dernière utilisée), ou celle d'un employé. */
+  defaultBoutiqueId: string | null;
+  /** Boutiques gérées par un gestionnaire, avec leur état. */
+  memberships: Array<{ id: string; actif: boolean }>;
+  /** Boutique d'un employé : active ou non. */
+  ownBoutiqueActive: boolean;
+}
 
 /**
  * Mémorise quelques secondes l'état « compte et boutique actifs » vérifié à
@@ -16,10 +29,10 @@ export class AuthCacheService {
   private static readonly TTL_MS = 30_000;
   private readonly entries = new Map<
     string,
-    { user: AuthenticatedUser; expiresAt: number }
+    { user: CachedAccount; expiresAt: number }
   >();
 
-  get(userId: string): AuthenticatedUser | undefined {
+  get(userId: string): CachedAccount | undefined {
     const entry = this.entries.get(userId);
     if (!entry) return undefined;
     if (entry.expiresAt < Date.now()) {
@@ -29,7 +42,7 @@ export class AuthCacheService {
     return entry.user;
   }
 
-  set(userId: string, user: AuthenticatedUser): void {
+  set(userId: string, user: CachedAccount): void {
     this.entries.set(userId, {
       user,
       expiresAt: Date.now() + AuthCacheService.TTL_MS,

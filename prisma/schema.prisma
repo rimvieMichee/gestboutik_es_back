@@ -61,6 +61,8 @@ model Boutique {
   updatedAt   DateTime       @updatedAt
 
   users          User[]
+  // Gestionnaires rattachés à cette boutique (un gestionnaire peut en gérer plusieurs).
+  managers       UserBoutique[]
   products       Product[]
   sales          Sale[]
   stockMovements StockMovement[]
@@ -68,6 +70,22 @@ model Boutique {
 
   @@index([statut])
   @@map("boutiques")
+}
+
+/// Boutiques gérées par un gestionnaire (ADMIN). Un employé reste rattaché à une
+/// seule boutique via User.boutiqueId ; pour un ADMIN, User.boutiqueId est la
+/// boutique par défaut (la dernière utilisée) et figure toujours dans cette table.
+model UserBoutique {
+  userId     String
+  boutiqueId String
+  createdAt  DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  boutique Boutique @relation(fields: [boutiqueId], references: [id], onDelete: Cascade)
+
+  @@id([userId, boutiqueId])
+  @@index([boutiqueId])
+  @@map("user_boutiques")
 }
 
 model User {
@@ -88,6 +106,8 @@ model User {
   boutiqueId String?
   boutique   Boutique? @relation(fields: [boutiqueId], references: [id], onDelete: Restrict)
 
+  // Boutiques gérées (rôle ADMIN uniquement).
+  boutiques      UserBoutique[]
   sales          Sale[]
   stockMovements StockMovement[]
   refreshTokens  RefreshToken[]

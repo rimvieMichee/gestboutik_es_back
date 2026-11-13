@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsString,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 
 export class CreateBoutiqueDto {
@@ -31,26 +32,35 @@ export class CreateBoutiqueDto {
   @IsString()
   ville?: string;
 
-  // Le SUPER_ADMIN crée la boutique et son administrateur en une seule étape :
-  // c'est ce compte Admin qui gérera ensuite les employés de la boutique.
+  // Le SUPER_ADMIN crée la boutique et son gestionnaire en une seule étape, ou
+  // rattache à la boutique un gestionnaire existant (adminUserId) : il gérera
+  // alors plusieurs boutiques et pourra passer de l'une à l'autre.
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  adminNom: string;
+  adminUserId?: string;
 
+  @ValidateIf((o: CreateBoutiqueDto) => !o.adminUserId)
   @IsString()
   @IsNotEmpty()
-  adminPrenom: string;
+  adminNom?: string;
+
+  @ValidateIf((o: CreateBoutiqueDto) => !o.adminUserId)
+  @IsString()
+  @IsNotEmpty()
+  adminPrenom?: string;
 
   // Numéro du gestionnaire : affiché en en-tête de ses rapports PDF.
   @IsOptional()
   @IsString()
   adminTelephone?: string;
 
+  @ValidateIf((o: CreateBoutiqueDto) => !o.adminUserId)
   @IsString()
   @IsNotEmpty()
-  adminUsername: string;
+  adminUsername?: string;
 
+  @ValidateIf((o: CreateBoutiqueDto) => !o.adminUserId)
   @IsString()
   @MinLength(8)
-  adminPassword: string;
+  adminPassword?: string;
 }
