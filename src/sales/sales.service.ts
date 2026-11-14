@@ -19,6 +19,7 @@ import { assertSameBoutique } from '../common/utils/tenant-scope.util';
 import { buildPaginationMeta } from '../common/utils/paginate.util';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { QuerySaleDto, SummarySaleQueryDto } from './dto/query-sale.dto';
+import { revenueWhere } from '../platform/stats.util';
 
 @Injectable()
 export class SalesService {
@@ -276,10 +277,22 @@ export class SalesService {
           }
         : {};
 
-    const [all, credit, unpaid] = await Promise.all([
+    const cashRange =
+      query.dateFrom || query.dateTo
+        ? {
+            ...(query.dateFrom ? { gte: new Date(query.dateFrom) } : {}),
+            ...(query.dateTo ? { lte: new Date(query.dateTo) } : {}),
+          }
+        : undefined;
+
+    const [all, cash, credit, unpaid] = await Promise.all([
       this.prisma.sale.aggregate({
         where: { ...scope, ...range },
         _count: { _all: true },
+      }),
+      // Chiffre d'affaires : l'encaissé seulement (un crédit compte une fois réglé).
+      this.prisma.sale.aggregate({
+        where: { ...scope, ...revenueWhere(cashRange) },
         _sum: { montantTotal: true },
       }),
       this.prisma.sale.aggregate({
@@ -296,7 +309,7 @@ export class SalesService {
 
     return {
       nombreVentes: all._count._all,
-      chiffreAffaires: all._sum.montantTotal ?? 0,
+      chiffreAffaires: cash._sum.montantTotal ?? 0,
       nombreCredits: credit._count._all,
       creditMontant: credit._sum.montantTotal ?? 0,
       creditEnCoursNombre: unpaid._count._all,
@@ -446,7 +459,7 @@ export class SalesService {
     };
   }
 
-  /** Le gestionnaire marque un crédit comme réglé (l'emprunteur a payé). */
+  /** Marque un crédit comme réglé (l'emprunteur a payé) : gestionnaire (toute la boutique) ou employé (ses ventes). */
   async settleCredit(user: AuthenticatedUser, id: string) {
     const sale = await this.findOne(user, id);
     if (!sale.isCredit) {

@@ -54,7 +54,8 @@ export class SalesController {
     return this.salesService.report(user, query);
   }
 
-  @Roles(Role.ADMIN)
+  // Le gestionnaire règle tout crédit de la boutique ; l'employé, ceux de ses propres ventes.
+  @Roles(Role.EMPLOYEE, Role.ADMIN)
   @Patch(':id/settle')
   settle(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.salesService.settleCredit(user, id);

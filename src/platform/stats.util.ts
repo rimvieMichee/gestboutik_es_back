@@ -16,6 +16,28 @@ export function startOfYearUtc(date = new Date()): Date {
   return new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
 }
 
+/**
+ * Chiffre d'affaires encaissé sur une période : une vente au comptant compte à
+ * sa date, une vente à crédit seulement une fois réglée, à la date du règlement.
+ * Sans période, tout ce qui est encaissé à ce jour.
+ */
+export function revenueWhere(range?: {
+  gte?: Date;
+  lte?: Date;
+}): import('@prisma/client').Prisma.SaleWhereInput {
+  if (!range) {
+    return {
+      OR: [{ isCredit: false }, { isCredit: true, creditRegleAt: { not: null } }],
+    };
+  }
+  return {
+    OR: [
+      { isCredit: false, createdAt: range },
+      { isCredit: true, creditRegleAt: range },
+    ],
+  };
+}
+
 export function daysAgoUtc(days: number): Date {
   const start = startOfDayUtc();
   start.setUTCDate(start.getUTCDate() - days);

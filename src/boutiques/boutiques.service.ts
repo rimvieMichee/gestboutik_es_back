@@ -15,6 +15,7 @@ import { QueryBoutiqueDto } from './dto/query-boutique.dto';
 import {
   daysAgoUtc,
   fillDays,
+  revenueWhere,
   startOfDayUtc,
   startOfMonthUtc,
   startOfYearUtc,
@@ -179,6 +180,11 @@ export class BoutiquesService {
     const ids = boutiques.map((b) => b.id);
     const completed = { statut: SaleStatus.COMPLETED, boutiqueId: { in: ids } };
 
+    const cashMonth = await this.prisma.sale.groupBy({
+      by: ['boutiqueId'],
+      where: { ...completed, ...revenueWhere({ gte: startOfMonthUtc() }) },
+      _sum: { montantTotal: true },
+    });
     const [users, products, salesMonth, lastSales, credits] = await Promise.all(
       [
         this.prisma.user.findMany({
@@ -245,7 +251,10 @@ export class BoutiquesService {
             0,
           ventesMois: {
             nombre: month?._count._all ?? 0,
-            chiffreAffaires: Number(month?._sum.montantTotal ?? 0),
+            chiffreAffaires: Number(
+              cashMonth.find((r) => r.boutiqueId === boutique.id)?._sum
+                .montantTotal ?? 0,
+            ),
           },
           creditEnCours: {
             nombre: credit?._count._all ?? 0,
@@ -287,11 +296,16 @@ export class BoutiquesService {
     const ids = memberships.map((m) => m.boutiqueId);
     if (!ids.length) return [];
     const completed = { statut: SaleStatus.COMPLETED, boutiqueId: { in: ids } };
-    const [today, credits] = await Promise.all([
+    const [today, cashToday, credits] = await Promise.all([
       this.prisma.sale.groupBy({
         by: ['boutiqueId'],
         where: { ...completed, createdAt: { gte: startOfDayUtc() } },
         _count: { _all: true },
+      }),
+      // Encaissé du jour : un crédit compte quand il est réglé.
+      this.prisma.sale.groupBy({
+        by: ['boutiqueId'],
+        where: { ...completed, ...revenueWhere({ gte: startOfDayUtc() }) },
         _sum: { montantTotal: true },
       }),
       this.prisma.sale.groupBy({
@@ -312,7 +326,10 @@ export class BoutiquesService {
         active: m.boutiqueId === user.boutiqueId,
         aujourdhui: {
           ventes: t?._count._all ?? 0,
-          chiffreAffaires: Number(t?._sum.montantTotal ?? 0),
+          chiffreAffaires: Number(
+            cashToday.find((r) => r.boutiqueId === m.boutiqueId)?._sum
+              .montantTotal ?? 0,
+          ),
         },
         creditEnCours: {
           nombre: c?._count._all ?? 0,
@@ -337,7 +354,21 @@ export class BoutiquesService {
         _count: { _all: true },
         _sum: { montantTotal: true },
       });
-    const periode = (agg: Awaited<ReturnType<typeof aggregate>>) => ({
+    // Ventes de la période (nombre) et encaissé (crédits réglés seulement).
+    const aggregateCash = async (range?: { gte?: Date }) => {
+      const [n, cash] = await Promise.all([
+        aggregate(range ? { createdAt: range } : {}),
+        this.prisma.sale.aggregate({
+          where: { ...base, ...revenueWhere(range) },
+          _sum: { montantTotal: true },
+        }),
+      ]);
+      return { _count: n._count, _sum: cash._sum };
+    };
+    const periode = (agg: {
+      _count: { _all: number };
+      _sum: { montantTotal: Prisma.Decimal | null };
+    }) => ({
       nombre: agg._count._all,
       chiffreAffaires: Number(agg._sum.montantTotal ?? 0),
     });
@@ -402,10 +433,10 @@ export class BoutiquesService {
         WHERE "boutiqueId" = ${id} AND statut = 'ACTIVE'::"ProductStatus"
           AND "quantiteDisponible" > 0
           AND "quantiteDisponible" <= "seuilAlerte"`),
-      aggregate({ createdAt: { gte: day } }),
-      aggregate({ createdAt: { gte: month } }),
-      aggregate({ createdAt: { gte: year } }),
-      aggregate({}),
+      aggregateCash({ gte: day }),
+      aggregateCash({ gte: month }),
+      aggregateCash({ gte: year }),
+      aggregateCash(),
       aggregate({ isCredit: true, creditRegleAt: null }),
       this.prisma.$queryRaw<
         Array<{ date: string; nombre: number; ca: number }>
