@@ -64,7 +64,7 @@ export class RealtimeService {
   productChanged(
     boutiqueId: string,
     productId: string,
-    change: 'created' | 'updated' | 'archived' | 'restored',
+    change: 'created' | 'updated' | 'archived' | 'restored' | 'deleted',
   ): void {
     this.emit([Rooms.boutique(boutiqueId), Rooms.platform], 'product.changed', {
       productId,

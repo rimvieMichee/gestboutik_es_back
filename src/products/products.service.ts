@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -150,5 +151,29 @@ export class ProductsService {
     );
     this.realtime.stockUpdated(updated.boutiqueId, updated);
     return updated;
+  }
+
+  /**
+   * Supprime définitivement un produit jamais vendu (son historique de stock
+   * part avec lui). Un produit déjà vendu reste : on l'archive à la place.
+   */
+  async remove(actor: AuthenticatedUser, id: string) {
+    const product = await this.prisma.product.findUnique({ where: { id } });
+    if (!product) {
+      throw new NotFoundException('Produit introuvable.');
+    }
+    assertSameBoutique(actor, product.boutiqueId);
+    const sold = await this.prisma.saleItem.count({ where: { productId: id } });
+    if (sold > 0) {
+      throw new ConflictException(
+        'Ce produit a déjà été vendu : il ne peut pas être supprimé sans fausser vos ventes. Archivez-le pour le retirer de la vente.',
+      );
+    }
+    await this.prisma.$transaction([
+      this.prisma.stockMovement.deleteMany({ where: { productId: id } }),
+      this.prisma.product.delete({ where: { id } }),
+    ]);
+    this.realtime.productChanged(product.boutiqueId, id, 'deleted');
+    return { id, deleted: true };
   }
 }

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -54,6 +55,14 @@ export class ProductsController {
     @Body() dto: UpdateProductDto,
   ) {
     return this.productsService.update(actor, id, dto);
+  }
+
+  // Suppression définitive : seulement si le produit n'a jamais été vendu
+  // (sinon l'historique des ventes serait faussé : on l'archive).
+  @Roles(Role.ADMIN)
+  @Delete(':id')
+  remove(@CurrentUser() actor: AuthenticatedUser, @Param('id') id: string) {
+    return this.productsService.remove(actor, id);
   }
 
   @Roles(Role.ADMIN)

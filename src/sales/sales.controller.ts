@@ -19,7 +19,8 @@ import { QuerySaleDto, SummarySaleQueryDto } from './dto/query-sale.dto';
 export class SalesController {
   constructor(private salesService: SalesService) {}
 
-  @Roles(Role.EMPLOYEE)
+  // Le gestionnaire vend aussi, comme un employé (sa vente porte son nom).
+  @Roles(Role.EMPLOYEE, Role.ADMIN)
   @Post()
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateSaleDto) {
     return this.salesService.create(user, dto);
