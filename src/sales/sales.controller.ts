@@ -13,7 +13,11 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { SalesService } from './sales.service';
 import { CreateSaleDto } from './dto/create-sale.dto';
-import { QuerySaleDto, SummarySaleQueryDto } from './dto/query-sale.dto';
+import {
+  QuerySaleDto,
+  SummariesQueryDto,
+  SummarySaleQueryDto,
+} from './dto/query-sale.dto';
 
 @Controller('sales')
 export class SalesController {
@@ -43,6 +47,16 @@ export class SalesController {
     @Query() query: SummarySaleQueryDto,
   ) {
     return this.salesService.summary(user, query);
+  }
+
+  // Totaux de plusieurs périodes en une seule requête (accueil de l'application).
+  @Roles(Role.EMPLOYEE, Role.ADMIN)
+  @Get('summaries')
+  summaries(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: SummariesQueryDto,
+  ) {
+    return this.salesService.summaries(user, query);
   }
 
   // Rapport complet d'une période, pour le PDF du gestionnaire.

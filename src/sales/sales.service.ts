@@ -18,7 +18,11 @@ import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { assertSameBoutique } from '../common/utils/tenant-scope.util';
 import { buildPaginationMeta } from '../common/utils/paginate.util';
 import { CreateSaleDto } from './dto/create-sale.dto';
-import { QuerySaleDto, SummarySaleQueryDto } from './dto/query-sale.dto';
+import {
+  QuerySaleDto,
+  SummariesQueryDto,
+  SummarySaleQueryDto,
+} from './dto/query-sale.dto';
 import { revenueWhere } from '../platform/stats.util';
 
 @Injectable()
@@ -314,6 +318,86 @@ export class SalesService {
       creditMontant: credit._sum.montantTotal ?? 0,
       creditEnCoursNombre: unpaid._count._all,
       creditEnCoursMontant: unpaid._sum.montantTotal ?? 0,
+    };
+  }
+
+  /**
+   * Totaux de plusieurs périodes en une seule requête SQL (une passe sur les
+   * ventes, agrégats FILTER) plus les effectifs de la boutique : remplace une
+   * dizaine d'allers-retours vers la base pour l'accueil de l'application.
+   * Mêmes règles que `summary` : le chiffre d'affaires n'est que de l'encaissé
+   * (un crédit compte une fois réglé).
+   */
+  async summaries(user: AuthenticatedUser, query: SummariesQueryDto) {
+    if (!user.boutiqueId) {
+      throw new ForbiddenException(
+        "Aucune boutique n'est associée à ce compte.",
+      );
+    }
+    let raw: unknown;
+    try {
+      raw = JSON.parse(query.ranges);
+    } catch {
+      throw new BadRequestException('Périodes invalides.');
+    }
+    if (!Array.isArray(raw) || raw.length === 0 || raw.length > 12) {
+      throw new BadRequestException('Périodes invalides.');
+    }
+    const ranges = raw.map((r: { key?: unknown; from?: unknown; to?: unknown }) => {
+      const key = String(r?.key ?? '');
+      const from = new Date(String(r?.from));
+      const to = new Date(String(r?.to));
+      if (!/^[a-zA-Z0-9_]{1,24}$/.test(key) || isNaN(+from) || isNaN(+to)) {
+        throw new BadRequestException('Périodes invalides.');
+      }
+      return { key, from, to };
+    });
+
+    const userId = user.role === Role.EMPLOYEE ? user.userId : query.userId;
+    const cols: Prisma.Sql[] = [
+      Prisma.sql`COUNT(*) FILTER (WHERE "isCredit" = true AND "creditRegleAt" IS NULL)::int AS un`,
+      Prisma.sql`COALESCE(SUM("montantTotal") FILTER (WHERE "isCredit" = true AND "creditRegleAt" IS NULL), 0)::float AS um`,
+    ];
+    ranges.forEach((r, i) => {
+      const created = Prisma.sql`("createdAt" >= ${r.from} AND "createdAt" <= ${r.to})`;
+      const settled = Prisma.sql`("creditRegleAt" >= ${r.from} AND "creditRegleAt" <= ${r.to})`;
+      cols.push(
+        Prisma.sql`COUNT(*) FILTER (WHERE ${created})::int AS ${Prisma.raw(`n${i}`)}`,
+        Prisma.sql`COALESCE(SUM("montantTotal") FILTER (WHERE ("isCredit" = false AND ${created}) OR ("isCredit" = true AND ${settled})), 0)::float AS ${Prisma.raw(`ca${i}`)}`,
+        Prisma.sql`COUNT(*) FILTER (WHERE "isCredit" = true AND ${created})::int AS ${Prisma.raw(`cn${i}`)}`,
+        Prisma.sql`COALESCE(SUM("montantTotal") FILTER (WHERE "isCredit" = true AND ${created}), 0)::float AS ${Prisma.raw(`cm${i}`)}`,
+      );
+    });
+    const who = userId ? Prisma.sql` AND "userId" = ${userId}` : Prisma.empty;
+    const isManager = user.role === Role.ADMIN;
+    const [rows, employes, produits] = await Promise.all([
+      this.prisma.$queryRaw<Array<Record<string, number>>>(
+        Prisma.sql`SELECT ${Prisma.join(cols)} FROM sales WHERE "boutiqueId" = ${user.boutiqueId} AND statut = 'COMPLETED'::"SaleStatus"${who}`,
+      ),
+      isManager
+        ? this.prisma.user.count({
+            where: { role: Role.EMPLOYEE, boutiqueId: user.boutiqueId },
+          })
+        : Promise.resolve(0),
+      isManager
+        ? this.prisma.product.count({ where: { boutiqueId: user.boutiqueId } })
+        : Promise.resolve(0),
+    ]);
+    const row = rows[0] ?? {};
+    const summaries: Record<string, unknown> = {};
+    ranges.forEach((r, i) => {
+      summaries[r.key] = {
+        nombreVentes: row[`n${i}`] ?? 0,
+        chiffreAffaires: row[`ca${i}`] ?? 0,
+        nombreCredits: row[`cn${i}`] ?? 0,
+        creditMontant: row[`cm${i}`] ?? 0,
+        creditEnCoursNombre: row['un'] ?? 0,
+        creditEnCoursMontant: row['um'] ?? 0,
+      };
+    });
+    return {
+      summaries,
+      effectifs: isManager ? { employes, produits } : undefined,
     };
   }
 

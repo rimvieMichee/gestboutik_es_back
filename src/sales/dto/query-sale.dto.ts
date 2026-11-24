@@ -26,6 +26,16 @@ export class QuerySaleDto extends PaginationQueryDto {
   credit?: 'all' | 'unpaid' | 'paid' | 'cash';
 }
 
+/** Plusieurs périodes en une requête : `ranges` = JSON [{key, from, to}]. */
+export class SummariesQueryDto {
+  @IsString()
+  ranges: string;
+
+  @IsOptional()
+  @IsString()
+  userId?: string;
+}
+
 export class SummarySaleQueryDto {
   @IsOptional()
   @IsDateString()
