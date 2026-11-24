@@ -576,4 +576,93 @@ export class BoutiquesService {
     });
     return boutique;
   }
+
+  /**
+   * Supprime définitivement une boutique : ses ventes, produits, mouvements de
+   * stock et comptes d'employés. Un gestionnaire qui gère d'autres boutiques
+   * garde son compte (sa boutique par défaut est reportée sur une autre) ; celui
+   * qui ne gérait que celle-ci est supprimé avec elle. Le journal d'activité est
+   * conservé (sans lien vers la boutique).
+   */
+  async remove(
+    id: string,
+    confirmNom: string | undefined,
+    actor: AuthenticatedUser,
+  ) {
+    const boutique = await this.findOne(id);
+    if ((confirmNom ?? '').trim() !== boutique.nom.trim()) {
+      throw new BadRequestException(
+        'Confirmation invalide : saisissez le nom exact de la boutique pour la supprimer.',
+      );
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const memberships = await tx.userBoutique.findMany({
+        where: { boutiqueId: id },
+        select: { userId: true },
+      });
+      const admins = await tx.user.findMany({
+        where: {
+          role: Role.ADMIN,
+          OR: [
+            { boutiqueId: id },
+            { id: { in: memberships.map((m) => m.userId) } },
+          ],
+        },
+        select: { id: true, boutiqueId: true },
+      });
+      const orphanAdmins: string[] = [];
+      for (const admin of admins) {
+        const other = await tx.userBoutique.findFirst({
+          where: { userId: admin.id, boutiqueId: { not: id } },
+          orderBy: { createdAt: 'asc' },
+        });
+        if (!other) {
+          orphanAdmins.push(admin.id);
+        } else if (admin.boutiqueId === id) {
+          await tx.user.update({
+            where: { id: admin.id },
+            data: { boutiqueId: other.boutiqueId },
+          });
+        }
+      }
+
+      const sales = await tx.sale.findMany({
+        where: { boutiqueId: id },
+        select: { id: true },
+      });
+      await tx.saleItem.deleteMany({
+        where: { saleId: { in: sales.map((s) => s.id) } },
+      });
+      await tx.sale.deleteMany({ where: { boutiqueId: id } });
+      await tx.stockMovement.deleteMany({ where: { boutiqueId: id } });
+      const products = await tx.product.deleteMany({
+        where: { boutiqueId: id },
+      });
+      const employees = await tx.user.deleteMany({
+        where: { role: Role.EMPLOYEE, boutiqueId: id },
+      });
+      if (orphanAdmins.length) {
+        await tx.user.deleteMany({ where: { id: { in: orphanAdmins } } });
+      }
+      await tx.boutique.delete({ where: { id } });
+      return {
+        ventes: sales.length,
+        produits: products.count,
+        employes: employees.count,
+        gestionnairesSupprimes: orphanAdmins.length,
+      };
+    });
+
+    this.authCache.clear();
+    this.realtime.disconnectBoutique(id);
+    await this.auditService.record({
+      action: 'BOUTIQUE_DELETED',
+      entity: 'Boutique',
+      entityId: id,
+      userId: actor.userId,
+      metadata: { nom: boutique.nom, ...result },
+    });
+    return { id, deleted: true, ...result };
+  }
 }

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -62,6 +63,19 @@ export class BoutiquesController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateBoutiqueDto) {
     return this.boutiquesService.update(id, dto);
+  }
+
+  // Suppression définitive d'une boutique et de tout ce qui lui appartient.
+  // Le nom exact de la boutique doit être répété (`confirmNom`) : garde-fou
+  // contre un appel accidentel.
+  @Roles(Role.SUPER_ADMIN)
+  @Delete(':id')
+  remove(
+    @Param('id') id: string,
+    @Query('confirmNom') confirmNom: string | undefined,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.boutiquesService.remove(id, confirmNom, actor);
   }
 
   @Roles(Role.SUPER_ADMIN)
