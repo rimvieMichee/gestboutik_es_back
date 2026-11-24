@@ -366,7 +366,7 @@ export class SalesService {
       this.prisma.sale.findMany({
         where,
         orderBy: { createdAt: 'asc' },
-        take: 2000,
+        take: 10000,
         include: {
           items: { include: { product: { select: { nom: true } } } },
           user: { select: { nom: true, prenom: true } },

@@ -9,6 +9,7 @@ import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { SwitchBoutiqueDto } from './dto/switch-boutique.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -38,6 +39,18 @@ export class AuthController {
     @Body() dto: SwitchBoutiqueDto,
   ) {
     return this.authService.switchBoutique(user.userId, dto);
+  }
+
+  // Gestionnaire ou employé : changer son propre mot de passe.
+  @Roles(Role.ADMIN, Role.EMPLOYEE)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('change-password')
+  changePassword(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.authService.changePassword(user.userId, dto);
   }
 
   @HttpCode(HttpStatus.OK)

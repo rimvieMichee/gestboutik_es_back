@@ -9,6 +9,7 @@ import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import { Boutique, BoutiqueStatus, Role, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomUUID } from 'crypto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { hashPassword, needsRehash } from '../common/utils/password.util';
@@ -320,6 +321,47 @@ export class AuthService {
       ville: m.boutique.ville,
       statut: m.boutique.statut,
     }));
+  }
+
+  /**
+   * Changement de mot de passe par l'utilisateur lui-même : l'ancien est exigé,
+   * et les sessions des autres appareils sont fermées (la session courante,
+   * identifiée par son refresh token, reste ouverte).
+   */
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException('Compte introuvable.');
+    const valid = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+    if (!valid) {
+      throw new BadRequestException('Le mot de passe actuel est incorrect.');
+    }
+    if (dto.currentPassword === dto.newPassword) {
+      throw new BadRequestException(
+        "Le nouveau mot de passe doit être différent de l'actuel.",
+      );
+    }
+    const passwordHash = await hashPassword(dto.newPassword);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash },
+    });
+    const keep = dto.refreshToken ? this.hashToken(dto.refreshToken) : undefined;
+    await this.prisma.refreshToken.updateMany({
+      where: {
+        userId,
+        revoked: false,
+        ...(keep ? { tokenHash: { not: keep } } : {}),
+      },
+      data: { revoked: true },
+    });
+    await this.auditService.record({
+      action: 'USER_PASSWORD_CHANGED',
+      entity: 'User',
+      entityId: userId,
+      userId,
+      boutiqueId: user.boutiqueId ?? undefined,
+    });
+    return { success: true };
   }
 
   async logout(userId: string, refreshToken: string) {
